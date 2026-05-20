@@ -11,6 +11,11 @@ import pickle
 import json
 import open3d as o3d
 import sapien.core as sapien
+
+# urdfpy 0.0.22 still uses the removed np.float alias when parsing URDFs.
+if not hasattr(np, "float"):
+    np.float = float
+
 from urdfpy import URDF
 
 

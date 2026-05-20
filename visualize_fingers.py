@@ -1,9 +1,14 @@
 import os
 import sapien.core as sapien
 from pathlib import Path
-from urdfpy import URDF
 import numpy as np
 import open3d as o3d
+
+# urdfpy 0.0.22 still uses the removed np.float alias when parsing URDFs.
+if not hasattr(np, "float"):
+    np.float = float
+
+from urdfpy import URDF
 
 
 def trimesh_to_open3d(trimesh_mesh):
