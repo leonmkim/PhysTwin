@@ -250,11 +250,88 @@ uv sync --group preprocessing-realsense   # collection / custom data only
 
 **Manual / git-heavy (documented, not uv-locked):**
 
-- Grounded-SAM-2 + GroundingDINO — `pip install -e` from clone; SAM2 configs at
-  `configs/sam2.1/` relative to install cwd
-- Checkpoints — `bash env_install/download_pretrained_models.sh`
+- Grounded-SAM-2 + GroundingDINO — shared clone + per-worktree editable install
+  (see **Stage E2d segmentation environment** below)
+- Checkpoints — shared cache under `PHYSTWIN_SEG_CHECKPOINT_DIR` (download requires
+  explicit approval; do not duplicate per worktree)
 - CoTracker — `torch.hub.load("facebookresearch/co-tracker", ...)` at runtime
 - TRELLIS — clone under `data_process/TRELLIS`, run `setup.sh` (native stack)
+
+### Stage E2d segmentation environment (shared cache)
+
+Segmentation scripts hardcode paths relative to the PhysTwin repo root:
+
+- SAM2 config: `configs/sam2.1/sam2.1_hiera_l.yaml`
+- Checkpoints: `data_process/groundedSAM_checkpoints/*.pt` / `*.pth`
+- `groundingdino` imports require `PYTHONPATH` to include the Grounded-SAM-2 clone root
+
+Use a **shared persistent cache** across worktrees (not per-worktree clones):
+
+```bash
+export PHYSTWIN_EXTERNAL_ROOT=/mnt/data2/magna/belt_perception/third_party/phystwin_external
+export GSAM_ROOT="${PHYSTWIN_EXTERNAL_ROOT}/Grounded-SAM-2"
+export PHYSTWIN_SEG_CHECKPOINT_DIR="${PHYSTWIN_EXTERNAL_ROOT}/checkpoints"
+```
+
+**One-time shared clone** (network/git; requires explicit approval):
+
+```bash
+mkdir -p "${PHYSTWIN_EXTERNAL_ROOT}"
+git clone https://github.com/IDEA-Research/Grounded-SAM-2.git "${GSAM_ROOT}"
+```
+
+**Per-worktree venv install** (after preprocessing-core sync):
+
+```bash
+cd third_party/phystwin
+uv sync --group core --group playground --group train --group preprocessing-core
+uv pip install -e "${GSAM_ROOT}"
+uv pip install --no-build-isolation -e "${GSAM_ROOT}/grounding_dino"
+uv pip install 'transformers<5' yapf timm addict pycocotools
+```
+
+**Shared checkpoint placement** (download/copy once; not committed):
+
+```text
+${PHYSTWIN_SEG_CHECKPOINT_DIR}/sam2.1_hiera_large.pt
+${PHYSTWIN_SEG_CHECKPOINT_DIR}/groundingdino_swint_ogc.pth
+```
+
+Checkpoint download requires explicit approval. When approved, download into the
+shared checkpoint dir (not into each worktree). `env_install/download_pretrained_models.sh`
+writes under `data_process/groundedSAM_checkpoints/` by default — move/copy the `.pt` /
+`.pth` files into `${PHYSTWIN_SEG_CHECKPOINT_DIR}/` afterward.
+
+**Per-worktree activation** (symlinks + `PYTHONPATH`; no install/download):
+
+```bash
+cd third_party/phystwin
+source scripts/setup_segmentation_env.sh
+```
+
+Scratch fallback for a single worktree only:
+
+```bash
+export PHYSTWIN_EXTERNAL_ROOT="$(pwd)/temp_external_uv"
+source scripts/setup_segmentation_env.sh
+```
+
+**First approved segmentation smoke (not run in E2d hygiene):** camera 0 only, scratch
+outputs under `temp_processed_data_uv/`, from PhysTwin repo root:
+
+```bash
+cd third_party/phystwin
+source scripts/setup_segmentation_env.sh
+
+env -u PYTHONPATH PYTHONPATH="${GSAM_ROOT}" \
+  timeout 7200s xvfb-run -a uv run python data_process/segment_util_video.py \
+    --base_path ./temp_processed_data_uv \
+    --case_name double_stretch_sloth \
+    --TEXT_PROMPT "sloth.hand" \
+    --camera_idx 0
+```
+
+Do not write author `data/`. Use `--base_path ./temp_processed_data_uv` only.
 
 **Environment note:** README warns that TRELLIS conflicts with
 `diff-gaussian-rasterization`. Prefer a preprocessing-focused sync without

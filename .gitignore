@@ -25,6 +25,9 @@ test_enhance*
 test_cases/
 data_process/models/weights/
 data_process/groundedSAM_checkpoints/
+data_process/groundedSAM_checkpoints/*.pt
+data_process/groundedSAM_checkpoints/*.pth
+configs/sam2.1
 real_data/
 data_process/TRELLIS
 quick_test/
