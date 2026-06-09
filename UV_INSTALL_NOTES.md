@@ -57,9 +57,25 @@ Headless import/run paths (e.g. `pynput`) need a display. Use `xvfb-run` or a lo
 server:
 
 ```bash
-xvfb-run -a uv run python interactive_playground.py \
-  --case_name double_stretch_sloth --n_ctrl_parts 2
+mkdir -p temp_experiments/logs
+timeout 180s xvfb-run -a \
+  uv run python interactive_playground.py \
+    --case_name double_stretch_sloth \
+    --n_ctrl_parts 2 \
+  2>&1 | tee temp_experiments/logs/interactive_playground_double_stretch_sloth.log
 ```
+
+## Playground smoke test (validated 2026-06-09)
+
+| Item | Result |
+|---|---|
+| Case | `double_stretch_sloth` |
+| Command | `timeout 180s xvfb-run -a uv run python interactive_playground.py --case_name double_stretch_sloth --n_ctrl_parts 2` (with runtime env above) |
+| Exit code | `124` from `timeout` — **acceptable** (infinite render loop; process was healthy) |
+| Artifacts loaded | `experiments_optimization/double_stretch_sloth/optimal_params.pkl`, `data/different_types/double_stretch_sloth/final_data.pkl`, `experiments/double_stretch_sloth/train/best_199.pth` |
+| Render loop | ~35–36 FPS sustained (simulator + Gaussian rendering + compositing) |
+| Errors | No traceback, CUDA symbol errors, missing-artifact asserts, or segfaults |
+| Log | `temp_experiments/logs/interactive_playground_double_stretch_sloth.log` (gitignored; do not commit) |
 
 ## Author artifacts (not committed)
 
