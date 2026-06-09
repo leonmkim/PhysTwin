@@ -2,16 +2,6 @@ import numpy as np
 import torch
 import trimesh
 import matplotlib.pyplot as plt
-from pytorch3d.renderer import (
-    look_at_view_transform,
-    PerspectiveCameras,
-    RasterizationSettings,
-    AmbientLights,
-    BlendParams,
-    MeshRenderer,
-    MeshRasterizer,
-    SoftPhongShader,
-)
 from scipy.spatial import cKDTree
 
 
@@ -135,6 +125,8 @@ def sample_camera_poses(radius, num_samples, num_up_samples=4, device="cpu"):
     camera_poses: A list of 4x4 transformation matrices representing the camera poses.
     camera_view_coord = word_coord @ camera_pose
     """
+    from pytorch3d.renderer import look_at_view_transform
+
     camera_poses = []
     phi = np.linspace(0, np.pi, num_samples)  # Elevation angle
     phi = phi[1:-1]  # Exclude poles
@@ -167,12 +159,21 @@ def sample_camera_poses(radius, num_samples, num_up_samples=4, device="cpu"):
 
 
 def render_image(mesh, camera_poses, width=640, height=480, fov=1, device="cpu"):
+    from pytorch3d.io import IO
+    from pytorch3d.io.experimental_gltf_io import MeshGlbFormat
+    from pytorch3d.renderer import (
+        AmbientLights,
+        BlendParams,
+        MeshRasterizer,
+        MeshRenderer,
+        PerspectiveCameras,
+        RasterizationSettings,
+        SoftPhongShader,
+    )
+
     camera_poses = torch.tensor(camera_poses, device=device)
     if len(camera_poses.shape) == 2:
         camera_poses = camera_poses[None, :]
-
-    from pytorch3d.io import IO
-    from pytorch3d.io.experimental_gltf_io import MeshGlbFormat
 
     io = IO()
     io.register_meshes_format(MeshGlbFormat())
