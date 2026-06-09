@@ -39,6 +39,7 @@ experiments*/
 gnn_test/
 exp_results/
 temp_experiments/
+temp_*_uv/
 temp_experiments_optimization_uv/
 temp_experiments_uv/
 temp_gaussian_output_uv/
