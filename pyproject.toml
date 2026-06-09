@@ -33,6 +33,12 @@ torch = [{ index = "pytorch-cu121" }]
 torchvision = [{ index = "pytorch-cu121" }]
 torchaudio = [{ index = "pytorch-cu121" }]
 warp-lang = [{ index = "nvidia" }]
+diff-gaussian-rasterization = { path = "gaussian_splatting/submodules/diff-gaussian-rasterization", editable = true }
+simple-knn = { path = "gaussian_splatting/submodules/simple-knn", editable = true }
+
+[tool.uv.extra-build-dependencies]
+diff-gaussian-rasterization = ["torch==2.4.0", "setuptools", "wheel"]
+simple-knn = ["torch==2.4.0", "setuptools", "wheel"]
 
 [dependency-groups]
 core-minimal = [
@@ -54,5 +60,30 @@ core = [
     { include-group = "core-minimal" },
     { include-group = "core-media" },
 ]
+playground = [
+    "open3d>=0.18.0",
+    "trimesh",
+    "rtree",
+    "pyrender",
+    "pyglet<2",
+    "pynput",
+    "usd-core",
+]
+train = [
+    "cma",
+    "scipy",
+    "scikit-learn",
+    "wandb",
+    "fvcore",
+    "stannum",
+]
+gaussian = [
+    "gsplat==1.4.0",
+    "kornia",
+    "plyfile",
+    "einops",
+    "diff-gaussian-rasterization",
+    "simple-knn",
+]
 
-# Deferred (Stage B+): playground, train, gaussian, preprocessing groups.
+# Deferred (Stage F): preprocessing group (TRELLIS, Grounded-SAM-2, RealSense, SDXL).
