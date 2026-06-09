@@ -24,12 +24,42 @@ def compute_iou(mask1, mask2):
 
 
 if __name__ == "__main__":
-    render_path = './data/render_eval_data'
-    human_mask_path = "./data/different_types_human_mask"
-    root_data_dir = './data/gaussian_data'
-    output_dir = './gaussian_output_dynamic'
+    import argparse
 
-    log_dir = './results'
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--render-eval-data-dir",
+        default="./data/render_eval_data",
+        help="Directory with render evaluation reference data",
+    )
+    parser.add_argument(
+        "--human-mask-path",
+        default="./data/different_types_human_mask",
+        help="Directory with human mask data per case",
+    )
+    parser.add_argument(
+        "--gaussian-data-dir",
+        default="./data/gaussian_data",
+        help="Gaussian scene data root",
+    )
+    parser.add_argument(
+        "--gaussian-output-dynamic-dir",
+        default="./gaussian_output_dynamic",
+        help="Rendered dynamic Gaussian output root (default: ./gaussian_output_dynamic)",
+    )
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        help="Directory for evaluation log output (default: results)",
+    )
+    args = parser.parse_args()
+
+    render_path = args.render_eval_data_dir
+    human_mask_path = args.human_mask_path
+    root_data_dir = args.gaussian_data_dir
+    output_dir = args.gaussian_output_dynamic_dir
+
+    log_dir = args.results_dir
     os.makedirs(log_dir, exist_ok=True)
     log_file_path = os.path.join(log_dir, 'output_dynamic.txt')
 

@@ -1,5 +1,14 @@
 from qqtt import InvPhyTrainerWarp
 from qqtt.utils import logger, cfg
+from qqtt.utils.output_dirs import (
+    add_experiments_dir_arg,
+    add_experiments_optimization_dir_arg,
+    add_reference_experiments_dir_arg,
+    add_reference_experiments_optimization_dir_arg,
+    experiments_case_dir,
+    optimal_params_path,
+    reference_experiments_root,
+)
 from datetime import datetime
 import random
 import numpy as np
@@ -28,6 +37,10 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--base_path", type=str, required=True)
     parser.add_argument("--case_name", type=str, required=True)
+    add_experiments_optimization_dir_arg(parser)
+    add_reference_experiments_optimization_dir_arg(parser)
+    add_experiments_dir_arg(parser)
+    add_reference_experiments_dir_arg(parser)
     args = parser.parse_args()
 
     base_path = args.base_path
@@ -40,10 +53,10 @@ if __name__ == "__main__":
 
     logger.info(f"[DATA TYPE]: {cfg.data_type}")
 
-    base_dir = f"experiments/{case_name}"
+    base_dir = experiments_case_dir(args, case_name)
 
     # Read the first-satage optimized parameters to set the indifferentiable parameters
-    optimal_path = f"experiments_optimization/{case_name}/optimal_params.pkl"
+    optimal_path = optimal_params_path(args, case_name)
     logger.info(f"Load optimal parameters from: {optimal_path}")
     assert os.path.exists(
         optimal_path
@@ -70,6 +83,8 @@ if __name__ == "__main__":
         base_dir=base_dir,
         pure_inference_mode=True,
     )
-    assert len(glob.glob(f"{base_dir}/train/best_*.pth")) > 0
-    best_model_path = glob.glob(f"{base_dir}/train/best_*.pth")[0]
+    checkpoint_root = reference_experiments_root(args)
+    checkpoint_dir = os.path.join(checkpoint_root, case_name, "train")
+    assert len(glob.glob(f"{checkpoint_dir}/best_*.pth")) > 0
+    best_model_path = glob.glob(f"{checkpoint_dir}/best_*.pth")[0]
     trainer.test(best_model_path)

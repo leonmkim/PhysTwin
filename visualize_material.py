@@ -1,6 +1,18 @@
 # Experimental feature to approximate the materials in the spring-mass model.
 from qqtt import InvPhyTrainerWarp
 from qqtt.utils import logger, cfg
+from qqtt.utils.output_dirs import (
+    add_experiments_dir_arg,
+    add_experiments_optimization_dir_arg,
+    add_gaussian_output_dir_arg,
+    add_reference_experiments_dir_arg,
+    add_reference_experiments_optimization_dir_arg,
+    add_reference_gaussian_output_dir_arg,
+    experiments_case_dir,
+    optimal_params_path,
+    reference_experiments_root,
+    reference_gaussian_output_root,
+)
 import random
 import numpy as np
 import torch
@@ -25,8 +37,6 @@ seed = 42
 set_all_seeds(seed)
 
 if __name__ == "__main__":
-    cfg.load_from_yaml("configs/real.yaml")
-
     parser = ArgumentParser()
     parser.add_argument(
         "--base_path",
@@ -36,9 +46,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--gaussian_path",
         type=str,
-        default="./gaussian_output",
+        default=None,
+        help="Gaussian output root (default: --reference-gaussian-output-dir or ./gaussian_output)",
     )
     parser.add_argument("--case_name", type=str, default="double_stretch_sloth")
+    add_experiments_optimization_dir_arg(parser)
+    add_reference_experiments_optimization_dir_arg(parser)
+    add_experiments_dir_arg(parser)
+    add_reference_experiments_dir_arg(parser)
+    add_gaussian_output_dir_arg(parser)
+    add_reference_gaussian_output_dir_arg(parser)
     args = parser.parse_args()
 
     base_path = args.base_path
@@ -49,10 +66,9 @@ if __name__ == "__main__":
     else:
         cfg.load_from_yaml("configs/real.yaml")
 
-    base_dir = f"./experiments/{case_name}"
+    base_dir = experiments_case_dir(args, case_name)
 
-    # Read the first-satage optimized parameters to set the indifferentiable parameters
-    optimal_path = f"./experiments_optimization/{case_name}/optimal_params.pkl"
+    optimal_path = optimal_params_path(args, case_name)
     logger.info(f"Load optimal parameters from: {optimal_path}")
     assert os.path.exists(
         optimal_path
@@ -61,7 +77,6 @@ if __name__ == "__main__":
         optimal_params = pickle.load(f)
     cfg.set_optimal_params(optimal_params)
 
-    # Set the intrinsic and extrinsic parameters for visualization
     with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
         c2ws = pickle.load(f)
     w2cs = [np.linalg.inv(c2w) for c2w in c2ws]
@@ -74,7 +89,10 @@ if __name__ == "__main__":
     cfg.overlay_path = f"{base_path}/{case_name}/color"
 
     exp_name = "init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
-    gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
+    gaussian_root = args.gaussian_path or reference_gaussian_output_root(args)
+    gaussians_path = (
+        f"{gaussian_root}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
+    )
 
     logger.set_log_file(path=base_dir, name="inference_log")
     trainer = InvPhyTrainerWarp(
@@ -83,5 +101,7 @@ if __name__ == "__main__":
         pure_inference_mode=True,
     )
 
-    best_model_path = glob.glob(f"experiments/{case_name}/train/best_*.pth")[0]
+    checkpoint_root = reference_experiments_root(args)
+    checkpoint_dir = os.path.join(checkpoint_root, case_name, "train")
+    best_model_path = glob.glob(f"{checkpoint_dir}/best_*.pth")[0]
     trainer.visualize_material(best_model_path, gaussians_path)

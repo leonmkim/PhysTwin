@@ -87,6 +87,63 @@ timeout 180s xvfb-run -a \
 | Errors | No traceback, CUDA symbol errors, missing-artifact asserts, or segfaults |
 | Log | `temp_experiments/logs/interactive_playground_double_stretch_sloth.log` (gitignored; do not commit) |
 
+## Stage C scratch output roots (output-safety)
+
+Training, optimization, inference, and Gaussian render scripts accept explicit
+output-root flags. **Upstream defaults are unchanged** when flags are omitted.
+
+| Scratch write root | CLI / env override |
+|---|---|
+| `temp_experiments_optimization_uv/` | `--experiments-optimization-dir` |
+| `temp_experiments_uv/` | `--experiments-dir` |
+| `temp_gaussian_output_uv/` | `--gaussian-output-dir` or `GAUSSIAN_OUTPUT_DIR` |
+| `temp_gaussian_output_dynamic_uv/` | `--gaussian-output-dynamic-dir` or `GAUSSIAN_OUTPUT_DYNAMIC_DIR` |
+| `temp_gaussian_output_dynamic_white_uv/` | `GAUSSIAN_OUTPUT_DYNAMIC_WHITE_DIR` |
+| `temp_gaussian_data_uv/` | `INTERP_POSES_OUTPUT_DIR` (with `GAUSSIAN_DATA_DIR` aligned; see below) |
+
+**`gs_run.sh` gaussian data coupling:** `generate_interp_poses.py` reads camera
+metadata from `GAUSSIAN_DATA_DIR` (default `./data/gaussian_data`). If
+`INTERP_POSES_OUTPUT_DIR` points at a scratch root, set `GAUSSIAN_DATA_DIR` to that
+same scratch root (after copying or symlinking scene dirs from reference data), or
+poses will not be visible to `gs_train.py -s`. Never write `interp_poses.pkl` into
+author `data/gaussian_data` when using scratch mode.
+
+Read author reference artifacts while writing scratch outputs:
+
+| Reference read | Flag / env |
+|---|---|
+| Author `experiments_optimization/` | `--reference-experiments-optimization-dir experiments_optimization` |
+| Author `experiments/` (checkpoints, inference.pkl) | `--reference-experiments-dir experiments` |
+| Author `gaussian_output/` (trained GS models) | `--reference-gaussian-output-dir ./gaussian_output` or `REFERENCE_GAUSSIAN_OUTPUT_DIR` |
+
+Example (optimize → train using author optimal params, scratch writes only):
+
+```bash
+cd third_party/phystwin
+mkdir -p temp_experiments_optimization_uv temp_experiments_uv
+
+uv run python optimize_cma.py \
+  --base_path ./data/different_types \
+  --case_name double_stretch_sloth \
+  --train_frame <frame> \
+  --experiments-optimization-dir temp_experiments_optimization_uv
+
+uv run python train_warp.py \
+  --base_path ./data/different_types \
+  --case_name double_stretch_sloth \
+  --train_frame <frame> \
+  --iterations 1 \
+  --experiments-optimization-dir temp_experiments_optimization_uv \
+  --reference-experiments-optimization-dir experiments_optimization \
+  --experiments-dir temp_experiments_uv
+```
+
+Use `--iterations 1` or `--iterations 2` for tiny smoke runs (default config
+iteration count is much larger).
+
+Do **not** run full training/render pipelines until this patch is reviewed. Use
+`--help` on entry points and `bash -n` on shell drivers to validate parsers only.
+
 ## Author artifacts (not committed)
 
 Large datasets live on shared storage. Symlink into this directory (see canonical

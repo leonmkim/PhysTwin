@@ -1,4 +1,9 @@
-output_dir="./gaussian_output_dynamic_white"
+#!/usr/bin/env bash
+# Output-root overrides (Stage C). Defaults preserve upstream paths.
+GAUSSIAN_OUTPUT_DYNAMIC_WHITE_DIR="${GAUSSIAN_OUTPUT_DYNAMIC_WHITE_DIR:-./gaussian_output_dynamic_white}"
+REFERENCE_GAUSSIAN_OUTPUT_DIR="${REFERENCE_GAUSSIAN_OUTPUT_DIR:-./gaussian_output}"
+REFERENCE_EXPERIMENTS_DIR="${REFERENCE_EXPERIMENTS_DIR:-experiments}"
+GAUSSIAN_DATA_DIR="${GAUSSIAN_DATA_DIR:-./data/gaussian_data}"
 
 # views=("0" "1" "2")
 views=("0")
@@ -20,17 +25,18 @@ exp_name='init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0'
 for scene_name in "${scenes[@]}"; do
 
     python gs_render_dynamics.py \
-        -s "./data/gaussian_data/${scene_name}" \
-        -m "./gaussian_output/${scene_name}/${exp_name}" \
+        -s "${GAUSSIAN_DATA_DIR}/${scene_name}" \
+        -m "${REFERENCE_GAUSSIAN_OUTPUT_DIR}/${scene_name}/${exp_name}" \
         --name "${scene_name}" \
         --white_background \
-        --output_dir "${output_dir}"
+        --output_dir "${GAUSSIAN_OUTPUT_DYNAMIC_WHITE_DIR}" \
+        --reference-experiments-dir "${REFERENCE_EXPERIMENTS_DIR}"
 
     for view_name in "${views[@]}"; do
         # Convert images to video
         python gaussian_splatting/img2video.py \
-            --image_folder ${output_dir}/${scene_name}/${view_name} \
-            --video_path ${output_dir}/${scene_name}/${view_name}.mp4
+            --image_folder "${GAUSSIAN_OUTPUT_DYNAMIC_WHITE_DIR}/${scene_name}/${view_name}" \
+            --video_path "${GAUSSIAN_OUTPUT_DYNAMIC_WHITE_DIR}/${scene_name}/${view_name}.mp4"
     done
 
 done

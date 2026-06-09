@@ -1,6 +1,10 @@
 # The first stage to optimize the sparse parameters using CMA-ES
 from qqtt import OptimizerCMA
 from qqtt.utils import logger, cfg
+from qqtt.utils.output_dirs import (
+    add_experiments_optimization_dir_arg,
+    experiments_optimization_case_dir,
+)
 from qqtt.utils.logger import StreamToLogger, logging
 import random
 import numpy as np
@@ -33,6 +37,7 @@ if __name__ == "__main__":
     parser.add_argument("--case_name", type=str, required=True)
     parser.add_argument("--train_frame", type=int, required=True)
     parser.add_argument("--max_iter", type=int, default=20)
+    add_experiments_optimization_dir_arg(parser)
     args = parser.parse_args()
 
     base_path = args.base_path
@@ -45,7 +50,7 @@ if __name__ == "__main__":
     else:
         cfg.load_from_yaml("configs/real.yaml")
 
-    base_dir = f"experiments_optimization/{case_name}"
+    base_dir = experiments_optimization_case_dir(args, case_name)
 
     # Set the intrinsic and extrinsic parameters for visualization
     with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:

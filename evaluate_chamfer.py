@@ -1,18 +1,16 @@
-import glob
-import pickle
-import json
-import torch
+import argparse
 import csv
-import numpy as np
+import glob
+import json
 import os
+import pickle
+
+import numpy as np
+import torch
 from pytorch3d.loss import chamfer_distance
 
-prediction_dir = "./experiments"
-base_path = "./data/different_types"
-output_file = "results/final_results.csv"
+from qqtt.utils.output_dirs import add_experiments_dir_arg, add_reference_experiments_dir_arg
 
-if not os.path.exists("results"):
-    os.makedirs("results")
 
 def evaluate_prediction(
     start_frame,
@@ -39,18 +37,15 @@ def evaluate_prediction(
         x = vertices[frame_idx]
         current_object_points = object_points[frame_idx]
         current_object_visibilities = object_visibilities[frame_idx]
-        # The motion valid indicates if the tracking is valid from prev_frame
         current_object_motions_valid = object_motions_valid[frame_idx - 1]
 
-        # Compute the single-direction chamfer loss for the object points
         chamfer_object_points = current_object_points[current_object_visibilities]
         chamfer_x = x[:num_surface_points]
-        # The GT chamfer_object_points can be partial,first find the nearest in second
         chamfer_error = chamfer_distance(
             chamfer_object_points.unsqueeze(0),
             chamfer_x.unsqueeze(0),
             single_directional=True,
-            norm=1,  # Get the L1 distance
+            norm=1,
         )[0]
 
         chamfer_errors.append(chamfer_error.item())
@@ -66,6 +61,26 @@ def evaluate_prediction(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base_path", type=str, default="./data/different_types")
+    add_experiments_dir_arg(parser)
+    add_reference_experiments_dir_arg(parser)
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        help="Directory for evaluation CSV output (default: results)",
+    )
+    args = parser.parse_args()
+
+    prediction_dir = (
+        args.reference_experiments_dir
+        if args.reference_experiments_dir
+        else args.experiments_dir
+    )
+    base_path = args.base_path
+    os.makedirs(args.results_dir, exist_ok=True)
+    output_file = os.path.join(args.results_dir, "final_results.csv")
+
     file = open(output_file, mode="w", newline="", encoding="utf-8")
     writer = csv.writer(file)
 
@@ -84,11 +99,9 @@ if __name__ == "__main__":
         case_name = dir_name.split("/")[-1]
         print(f"Processing {case_name}")
 
-        # Read the trajectory data
         with open(f"{dir_name}/inference.pkl", "rb") as f:
             vertices = pickle.load(f)
 
-        # Read the GT object points and masks
         with open(f"{base_path}/{case_name}/final_data.pkl", "rb") as f:
             data = pickle.load(f)
 
@@ -98,7 +111,6 @@ if __name__ == "__main__":
         num_original_points = object_points.shape[1]
         num_surface_points = num_original_points + data["surface_points"].shape[0]
 
-        # read the train/test split
         with open(f"{base_path}/{case_name}/split.json", "r") as f:
             split = json.load(f)
         train_frame = split["train"][1]
@@ -108,7 +120,6 @@ if __name__ == "__main__":
             test_frame == vertices.shape[0]
         ), f"Test frame {test_frame} != {vertices.shape[0]}"
 
-        # Do the statistics on train split, only evalaute from the 2nd frame
         results_train = evaluate_prediction(
             1,
             train_frame,
