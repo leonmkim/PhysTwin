@@ -1,0 +1,117 @@
+[project]
+name = "phystwin"
+version = "0.1.0"
+description = "PhysTwin baseline (isolated uv env)"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qqtt*", "gaussian_splatting*"]
+
+[tool.uv]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+default-groups = []
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com/"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu121" }]
+torchvision = [{ index = "pytorch-cu121" }]
+torchaudio = [{ index = "pytorch-cu121" }]
+warp-lang = [{ index = "nvidia" }]
+pytorch3d = { url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt240/pytorch3d-0.7.8-cp310-cp310-linux_x86_64.whl" }
+diff-gaussian-rasterization = { path = "gaussian_splatting/submodules/diff-gaussian-rasterization", editable = true }
+simple-knn = { path = "gaussian_splatting/submodules/simple-knn", editable = true }
+
+[tool.uv.extra-build-dependencies]
+diff-gaussian-rasterization = ["torch==2.4.0", "setuptools", "wheel", "ninja"]
+simple-knn = ["torch==2.4.0", "setuptools", "wheel", "ninja"]
+
+[dependency-groups]
+core-minimal = [
+    "numpy==1.26.4",
+    "torch==2.4.0",
+    "warp-lang>=1.0.0",
+    "termcolor",
+    "tqdm",
+]
+core-media = [
+    "torchvision==0.19.0",
+    "torchaudio==2.4.0",
+    "matplotlib",
+    "opencv-python",
+    "imageio",
+    "moviepy",
+]
+core = [
+    { include-group = "core-minimal" },
+    { include-group = "core-media" },
+]
+playground = [
+    "open3d>=0.18.0",
+    "trimesh",
+    "rtree",
+    "pyrender",
+    "pyglet<2",
+    "pynput",
+    "usd-core",
+]
+train = [
+    "cma",
+    "scipy",
+    "scikit-learn",
+    "wandb",
+    "fvcore",
+    "stannum",
+]
+gaussian = [
+    "gsplat==1.4.0",
+    "kornia",
+    "plyfile",
+    "einops",
+    "pytorch3d==0.7.8",
+    "diff-gaussian-rasterization",
+    "simple-knn",
+]
+
+# Stage E preprocessing (scaffolding only; heavy/git deps documented in UV_INSTALL_NOTES.md).
+preprocessing-core = [
+    { include-group = "core" },
+    { include-group = "playground" },
+    "supervision",
+    "pillow",
+    "huggingface-hub",
+]
+preprocessing-segmentation = [
+    { include-group = "preprocessing-core" },
+    # Manual after uv sync: Grounded-SAM-2 (sam2 + groundingdino) + checkpoint download.
+    # See UV_INSTALL_NOTES.md Stage E; do not lock git URLs here.
+]
+preprocessing-diffusion = [
+    "diffusers",
+    "accelerate",
+    "transformers",
+]
+preprocessing-trellis = [
+    { include-group = "preprocessing-diffusion" },
+    # Manual: git clone data_process/TRELLIS + setup.sh (native stack).
+]
+preprocessing-realsense = [
+    "Cython",
+    "pyrealsense2",
+    "atomics",
+]

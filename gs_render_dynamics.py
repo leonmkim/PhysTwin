@@ -46,6 +46,12 @@ from gaussian_splatting.dynamic_utils import (
 )
 import pickle
 
+from qqtt.utils.output_dirs import (
+    add_experiments_dir_arg,
+    add_reference_experiments_dir_arg,
+    reference_experiments_root,
+)
+
 
 def render_set(
     output_path,
@@ -114,6 +120,7 @@ def render_sets(
     remove_gaussians: bool = False,
     name: str = "dynamic",
     output_dir: str = "./gaussian_output_dynamic",
+    reference_experiments_dir: str | None = None,
 ):
     with torch.no_grad():
         output_path = output_dir
@@ -136,7 +143,8 @@ def render_sets(
 
         # rollout
         exp_name = dataset.source_path.split("/")[-1]
-        ctrl_pts_path = f"./experiments/{exp_name}/inference.pkl"
+        experiments_read_root = reference_experiments_dir or "experiments"
+        ctrl_pts_path = os.path.join(experiments_read_root, exp_name, "inference.pkl")
         with open(ctrl_pts_path, "rb") as f:
             ctrl_pts = pickle.load(f)  # (n_frames, n_ctrl_pts, 3) ndarray
         ctrl_pts = torch.tensor(ctrl_pts, dtype=torch.float32, device="cuda")
@@ -283,6 +291,8 @@ if __name__ == "__main__":
     parser.add_argument("--remove_gaussians", action="store_true")
     parser.add_argument("--name", default="sceneA", type=str)
     parser.add_argument("--output_dir", default="./gaussian_output_dynamic", type=str)
+    add_experiments_dir_arg(parser)
+    add_reference_experiments_dir_arg(parser)
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 
@@ -299,6 +309,7 @@ if __name__ == "__main__":
         args.remove_gaussians,
         args.name,
         args.output_dir,
+        reference_experiments_root(args),
     )
 
     with open("./rendering_finished_dynamic.txt", "a") as f:

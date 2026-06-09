@@ -1,4 +1,11 @@
-output_dir="./gaussian_output_dynamic"
+#!/usr/bin/env bash
+# Output-root overrides (Stage C). Defaults preserve upstream paths.
+GAUSSIAN_OUTPUT_DYNAMIC_DIR="${GAUSSIAN_OUTPUT_DYNAMIC_DIR:-./gaussian_output_dynamic}"
+REFERENCE_GAUSSIAN_OUTPUT_DIR="${REFERENCE_GAUSSIAN_OUTPUT_DIR:-./gaussian_output}"
+REFERENCE_EXPERIMENTS_DIR="${REFERENCE_EXPERIMENTS_DIR:-experiments}"
+# Scene source for gs_render_dynamics.py (-s). Set GAUSSIAN_DATA_DIR to a scratch
+# root (e.g. temp_gaussian_data_uv) to avoid rewriting points3D.ply under author data/.
+gaussian_data_dir="${GAUSSIAN_DATA_DIR:-./data/gaussian_data}"
 
 # views=("0" "1" "2")
 views=("0")
@@ -20,15 +27,17 @@ exp_name='init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0'
 for scene_name in "${scenes[@]}"; do
 
     python gs_render_dynamics.py \
-        -s ./data/gaussian_data/${scene_name} \
-        -m ./gaussian_output/${scene_name}/${exp_name} \
-        --name ${scene_name} \
+        -s "${gaussian_data_dir}/${scene_name}" \
+        -m "${REFERENCE_GAUSSIAN_OUTPUT_DIR}/${scene_name}/${exp_name}" \
+        --name "${scene_name}" \
+        --output_dir "${GAUSSIAN_OUTPUT_DYNAMIC_DIR}" \
+        --reference-experiments-dir "${REFERENCE_EXPERIMENTS_DIR}"
 
     for view_name in "${views[@]}"; do
         # Convert images to video
         python gaussian_splatting/img2video.py \
-            --image_folder ${output_dir}/${scene_name}/${view_name} \
-            --video_path ${output_dir}/${scene_name}/${view_name}.mp4
+            --image_folder "${GAUSSIAN_OUTPUT_DYNAMIC_DIR}/${scene_name}/${view_name}" \
+            --video_path "${GAUSSIAN_OUTPUT_DYNAMIC_DIR}/${scene_name}/${view_name}.mp4"
     done
 
 done

@@ -1,5 +1,12 @@
 from qqtt import InvPhyTrainerWarp
 from qqtt.utils import logger, cfg
+from qqtt.utils.output_dirs import (
+    add_experiments_dir_arg,
+    add_experiments_optimization_dir_arg,
+    add_reference_experiments_optimization_dir_arg,
+    experiments_case_dir,
+    optimal_params_path,
+)
 from datetime import datetime
 import random
 import numpy as np
@@ -28,6 +35,15 @@ if __name__ == "__main__":
     parser.add_argument("--base_path", type=str, required=True)
     parser.add_argument("--case_name", type=str, required=True)
     parser.add_argument("--train_frame", type=int, required=True)
+    parser.add_argument("--iterations", type=int, default=None)
+    parser.add_argument(
+        "--disable-video-logging",
+        action="store_true",
+        help="Skip training mp4 creation and wandb video upload (checkpoints unchanged)",
+    )
+    add_experiments_optimization_dir_arg(parser)
+    add_reference_experiments_optimization_dir_arg(parser)
+    add_experiments_dir_arg(parser)
     args = parser.parse_args()
 
     base_path = args.base_path
@@ -39,12 +55,17 @@ if __name__ == "__main__":
     else:
         cfg.load_from_yaml("configs/real.yaml")
 
+    if args.iterations is not None:
+        cfg.iterations = args.iterations
+    if args.disable_video_logging:
+        cfg.disable_video_logging = True
+
     print(f"[DATA TYPE]: {cfg.data_type}")
 
-    base_dir = f"experiments/{case_name}"
+    base_dir = experiments_case_dir(args, case_name)
 
     # Read the first-satage optimized parameters
-    optimal_path = f"experiments_optimization/{case_name}/optimal_params.pkl"
+    optimal_path = optimal_params_path(args, case_name)
     assert os.path.exists(
         optimal_path
     ), f"{case_name}: Optimal parameters not found: {optimal_path}"

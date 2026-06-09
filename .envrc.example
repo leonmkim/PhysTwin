@@ -1,0 +1,45 @@
+# PhysTwin-local environment example (copy to .envrc only inside third_party/phystwin).
+# Do NOT add this to belt_perception root .envrc.
+#
+# Usage (optional, submodule only):
+#   uv sync --group core --group playground --group gaussian --group train   # FIRST
+#   cp .envrc.example .envrc
+#   direnv allow
+#
+# If direnv is loaded before uv sync, LD_LIBRARY_PATH will not include PyTorch lib/
+# and imports of simple-knn / diff-gaussian-rasterization may fail (libc10.so).
+# After uv sync: direnv reload
+
+# --- Validated path: CUDA 12.6 + PyTorch cu121 wheels (RTX 4090, sm_89) ---
+# Uncomment if your machine uses Lmod like belt_perception:
+# source /etc/profile.d/lmod.sh 2>/dev/null || true
+# module load cuda/12.6
+# export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.6}"
+
+export WANDB_MODE=offline
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.9+PTX}"
+
+# PyTorch bundled libs for CUDA extension imports (simple-knn, diff-gaussian-rasterization).
+# Requires uv sync to have run first; otherwise _torch_lib is empty and libc10.so errors occur.
+if [ -d ".venv" ]; then
+  _torch_lib="$(.venv/bin/python -c 'import torch, os; print(os.path.join(os.path.dirname(torch.__file__), "lib"))' 2>/dev/null || true)"
+  if [ -n "${_torch_lib}" ]; then
+    export LD_LIBRARY_PATH="${_torch_lib}:${LD_LIBRARY_PATH:-}"
+  else
+    echo "phystwin .envrc: torch not importable in .venv — run uv sync, then direnv reload" >&2
+  fi
+  unset _torch_lib
+  export PATH="${PWD}/.venv/bin:${PATH}"
+fi
+
+# --- Author artifact symlinks (not committed; point to your large-storage copy) ---
+# ln -sfn /mnt/data2/magna/belt_perception/third_party/phystwin/data ./data
+# ln -sfn /mnt/data2/magna/belt_perception/third_party/phystwin/experiments ./experiments
+# ln -sfn /mnt/data2/magna/belt_perception/third_party/phystwin/experiments_optimization ./experiments_optimization
+# ln -sfn /mnt/data2/magna/belt_perception/third_party/phystwin/gaussian_output ./gaussian_output
+# ln -sfn /mnt/data2/magna/belt_perception/third_party/phystwin/gaussian_output_dynamic ./gaussian_output_dynamic
+
+# --- CUDA 12.1 fallback (only if nvcc 12.6 native builds fail) ---
+# module load cuda/12.1
+# export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.1}"
+# Then rebuild gaussian native extensions per UV_INSTALL_NOTES.md

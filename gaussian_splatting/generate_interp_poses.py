@@ -1,7 +1,8 @@
+import argparse
 import numpy as np
-import scipy.interpolate
-import pickle
 import os
+import pickle
+import scipy.interpolate
 
 
 def normalize(v):
@@ -70,9 +71,27 @@ def generate_interpolated_path(poses: np.ndarray,
 
 
 if __name__ == '__main__':
-    root_dir = "./data/gaussian_data"
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--gaussian-data-dir",
+        default="./data/gaussian_data",
+        help="Read camera_meta.pkl from this root (default: ./data/gaussian_data)",
+    )
+    parser.add_argument(
+        "--interp-poses-output-dir",
+        default=None,
+        help=(
+            "Write interp_poses.pkl under this root per scene. "
+            "Default: write into each scene dir under --gaussian-data-dir (upstream)."
+        ),
+    )
+    args = parser.parse_args()
+
+    root_dir = args.gaussian_data_dir
     for scene_name in sorted(os.listdir(root_dir)):
         scene_dir = os.path.join(root_dir, scene_name)
+        if not os.path.isdir(scene_dir):
+            continue
         print(f'Processing {scene_name}')
         camera_path = os.path.join(scene_dir, 'camera_meta.pkl')
         with open(camera_path, 'rb') as f:
@@ -90,5 +109,11 @@ if __name__ == '__main__':
         interp_poses_20 = generate_interpolated_path(poses_20, n_interp)
         interp_poses = np.concatenate([interp_poses_01, interp_poses_12, interp_poses_20], 0)
         output_poses = [np.vstack([pose, np.array([0, 0, 0, 1])]) for pose in interp_poses]
-        pickle.dump(output_poses, open(os.path.join(scene_dir, 'interp_poses.pkl'), 'wb'))
-        
+        if args.interp_poses_output_dir:
+            out_scene_dir = os.path.join(args.interp_poses_output_dir, scene_name)
+            os.makedirs(out_scene_dir, exist_ok=True)
+            out_path = os.path.join(out_scene_dir, 'interp_poses.pkl')
+        else:
+            out_path = os.path.join(scene_dir, 'interp_poses.pkl')
+        with open(out_path, 'wb') as f:
+            pickle.dump(output_poses, f)
