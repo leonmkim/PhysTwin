@@ -88,4 +88,30 @@ gaussian = [
     "simple-knn",
 ]
 
-# Deferred (Stage F): preprocessing group (TRELLIS, Grounded-SAM-2, RealSense, SDXL).
+# Stage E preprocessing (scaffolding only; heavy/git deps documented in UV_INSTALL_NOTES.md).
+preprocessing-core = [
+    { include-group = "core" },
+    { include-group = "playground" },
+    "supervision",
+    "pillow",
+    "huggingface-hub",
+]
+preprocessing-segmentation = [
+    { include-group = "preprocessing-core" },
+    # Manual after uv sync: Grounded-SAM-2 (sam2 + groundingdino) + checkpoint download.
+    # See UV_INSTALL_NOTES.md Stage E; do not lock git URLs here.
+]
+preprocessing-diffusion = [
+    "diffusers",
+    "accelerate",
+    "transformers",
+]
+preprocessing-trellis = [
+    { include-group = "preprocessing-diffusion" },
+    # Manual: git clone data_process/TRELLIS + setup.sh (native stack).
+]
+preprocessing-realsense = [
+    "Cython",
+    "pyrealsense2",
+    "atomics",
+]

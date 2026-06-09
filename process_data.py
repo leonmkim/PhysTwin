@@ -15,6 +15,13 @@ parser.add_argument("--case_name", type=str, required=True)
 # The category of the object used for segmentation
 parser.add_argument("--category", type=str, required=True)
 parser.add_argument("--shape_prior", action="store_true", default=False)
+parser.add_argument(
+    "--timer-log",
+    dest="timer_log",
+    type=str,
+    default="timer.log",
+    help="Path for stage timing log (default: timer.log in cwd)",
+)
 args = parser.parse_args()
 
 # Set the debug flags
@@ -31,11 +38,12 @@ category = args.category
 TEXT_PROMPT = f"{category}.hand"
 CONTROLLER_NAME = "hand"
 SHAPE_PRIOR = args.shape_prior
+TIMER_LOG = args.timer_log
 
 logger = None
 
 
-def setup_logger(log_file="timer.log"):
+def setup_logger(log_file=TIMER_LOG):
     global logger 
 
     if logger is None:
@@ -43,6 +51,9 @@ def setup_logger(log_file="timer.log"):
         logger.setLevel(logging.INFO)
 
         if not logger.handlers:
+            log_dir = os.path.dirname(log_file)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
             file_handler = logging.FileHandler(log_file)
             file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
 
@@ -53,7 +64,7 @@ def setup_logger(log_file="timer.log"):
             logger.addHandler(console_handler)
 
 
-setup_logger()
+setup_logger(TIMER_LOG)
 
 
 def existDir(dir_path):

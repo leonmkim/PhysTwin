@@ -156,6 +156,111 @@ count is much larger). Set `WANDB_MODE=disabled` to avoid wandb overhead.
 Do **not** run full training/render pipelines until this patch is reviewed. Use
 `--help` on entry points and `bash -n` on shell drivers to validate parsers only.
 
+## Stage E preprocessing (raw RGB-D → processed artifacts)
+
+Stage E validates the README “Data Processing from Raw Videos” path. **Stage E0**
+(output-safety + dependency scaffolding) does not run preprocessing or install
+heavy models.
+
+### Raw case input layout
+
+Each case directory under the processed root contains at minimum:
+
+- `color/` — per-camera `{i}.mp4` and `color/{i}/{frame}.png`
+- `depth/` — per-camera `{i}/{frame}.npy` (depth in mm)
+- `calibrate.pkl` — camera extrinsics
+- `metadata.json` — `intrinsics`, `WH`, `frame_num`, etc.
+
+Downstream steps add `mask/`, `cotracker/`, `pcd/`, `shape/`, `final_data.pkl`,
+`split.json`, and export targets under `gaussian_data/`.
+
+### Scratch roots (do not write author `data/`)
+
+| Scratch root | Purpose |
+|---|---|
+| `temp_raw_data_uv/<case>/` | Seeded raw RGB-D copy (read author `data/` only) |
+| `temp_processed_data_uv/<case>/` | `process_data.py` outputs |
+| `temp_gaussian_data_uv/<case>/` | `export_gaussian_data.py` outputs |
+| `temp_masks_uv/<case>/` | `export_video_human_mask.py` outputs |
+| `temp_preprocess_results_uv/` | Logs, compare reports, optional `--timer-log` |
+
+**Never** use symlinked author `data/different_types` as `--base-path` when running
+exports or `process_data.py` in scratch-validation mode. `export_video_human_mask.py`
+removes `{base_path}/{case}/tmp_data` after each camera; that side effect is
+confined to the selected `--base-path`.
+
+### Output-safety flags (defaults match upstream)
+
+| Script | Flags | Default |
+|---|---|---|
+| `process_data.py` | `--base_path`, `--timer-log` | `./data/different_types`, `timer.log` |
+| `script_process_data.py` | `--base-path`, `--timer-log` | `./data/different_types`, `timer.log` |
+| `export_gaussian_data.py` | `--base-path`, `--output-path`, `--case-name` | `./data/different_types`, `./data/gaussian_data` |
+| `export_video_human_mask.py` | `--base-path`, `--output-path`, `--case-name` | `./data/different_types`, `./data/different_types_human_mask` |
+| `export_render_eval_data.py` | `--base-path`, `--output-path`, `--case-name` | `./data/different_types`, `./data/render_eval_data` |
+
+`script_process_data.py` removes `--timer-log` at start (upstream removed `timer.log`
+in cwd). Point `--timer-log` at `temp_preprocess_results_uv/timer.log` for scratch runs.
+
+### Safe single-case examples (after Stage E1+ deps installed)
+
+```bash
+cd third_party/phystwin
+mkdir -p temp_preprocess_results_uv/logs
+
+# Seed raw (read-only copy from author reference)
+mkdir -p temp_raw_data_uv
+rsync -a \
+  --include='color/***' --include='depth/***' \
+  --include='calibrate.pkl' --include='metadata.json' \
+  --exclude='*' \
+  data/different_types/double_stretch_sloth/ \
+  temp_raw_data_uv/double_stretch_sloth/
+
+cp -a temp_raw_data_uv/double_stretch_sloth temp_processed_data_uv/
+
+xvfb-run -a uv run python process_data.py \
+  --base_path ./temp_processed_data_uv \
+  --case_name double_stretch_sloth \
+  --category sloth \
+  --shape_prior \
+  --timer-log temp_preprocess_results_uv/timer.log
+
+uv run python export_gaussian_data.py \
+  --base-path ./temp_processed_data_uv \
+  --output-path ./temp_gaussian_data_uv \
+  --case-name double_stretch_sloth
+```
+
+Do **not** run the above until segmentation/TRELLIS/SDXL/CoTracker deps are installed
+(Stage E1+). Use `--help` only during Stage E0.
+
+### Dependency groups (submodule `pyproject.toml` only)
+
+```bash
+cd third_party/phystwin
+
+# Lightweight scaffolding (Stage E0/E1)
+uv sync --group core --group playground --group preprocessing-core
+
+# Optional PyPI groups (install only when needed)
+uv sync --group preprocessing-diffusion
+uv sync --group preprocessing-realsense   # collection / custom data only
+```
+
+**Manual / git-heavy (documented, not uv-locked):**
+
+- Grounded-SAM-2 + GroundingDINO — `pip install -e` from clone; SAM2 configs at
+  `configs/sam2.1/` relative to install cwd
+- Checkpoints — `bash env_install/download_pretrained_models.sh`
+- CoTracker — `torch.hub.load("facebookresearch/co-tracker", ...)` at runtime
+- TRELLIS — clone under `data_process/TRELLIS`, run `setup.sh` (native stack)
+
+**Environment note:** README warns that TRELLIS conflicts with
+`diff-gaussian-rasterization`. Prefer a preprocessing-focused sync without
+`--group gaussian` until preprocessing is validated; add `gaussian` only for
+Stage D-style training/render work.
+
 ## Author artifacts (not committed)
 
 Large datasets live on shared storage. Symlink into this directory (see canonical

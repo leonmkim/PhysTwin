@@ -40,12 +40,16 @@ gnn_test/
 exp_results/
 temp_experiments/
 temp_*_uv/
+temp_raw_data_uv/
+temp_processed_data_uv/
+temp_gaussian_data_uv/
+temp_masks_uv/
+temp_preprocess_results_uv/
 temp_experiments_optimization_uv/
 temp_experiments_uv/
 temp_gaussian_output_uv/
 temp_gaussian_output_dynamic_uv/
 temp_gaussian_output_dynamic_white_uv/
-temp_gaussian_data_uv/
 temp_results_uv/
 gaussian_output/
 /gaussian_output

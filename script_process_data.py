@@ -1,9 +1,33 @@
-import os
 import csv
+import os
+import subprocess
+import sys
+from argparse import ArgumentParser
 
-base_path = "./data/different_types"
+parser = ArgumentParser(
+    description="Batch-run process_data.py for cases listed in data_config.csv",
+)
+parser.add_argument(
+    "--base-path",
+    dest="base_path",
+    type=str,
+    default="./data/different_types",
+    help="Root directory containing per-case folders (default: ./data/different_types)",
+)
+parser.add_argument(
+    "--timer-log",
+    dest="timer_log",
+    type=str,
+    default="timer.log",
+    help="Timer log path removed at start and written by child process_data.py (default: timer.log)",
+)
+args = parser.parse_args()
 
-os.system("rm -f timer.log")
+base_path = args.base_path
+timer_log = args.timer_log
+
+if os.path.isfile(timer_log):
+    os.remove(timer_log)
 
 with open("data_config.csv", newline="", encoding="utf-8") as csvfile:
     reader = csv.reader(csvfile)
@@ -15,11 +39,19 @@ with open("data_config.csv", newline="", encoding="utf-8") as csvfile:
         if not os.path.exists(f"{base_path}/{case_name}"):
             continue
 
+        cmd = [
+            sys.executable,
+            "process_data.py",
+            "--base_path",
+            base_path,
+            "--case_name",
+            case_name,
+            "--category",
+            category,
+            "--timer-log",
+            timer_log,
+        ]
         if shape_prior.lower() == "true":
-            os.system(
-                f"python process_data.py --base_path {base_path} --case_name {case_name} --category {category} --shape_prior"
-            )
-        else:
-            os.system(
-                f"python process_data.py --base_path {base_path} --case_name {case_name} --category {category}"
-            )
+            cmd.append("--shape_prior")
+
+        subprocess.run(cmd, check=True)
