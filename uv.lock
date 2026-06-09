@@ -841,6 +841,7 @@ gaussian = [
     { name = "gsplat", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "kornia", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "plyfile", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "pytorch3d", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "simple-knn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 playground = [
@@ -898,6 +899,7 @@ gaussian = [
     { name = "gsplat", specifier = "==1.4.0" },
     { name = "kornia" },
     { name = "plyfile" },
+    { name = "pytorch3d", url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt240/pytorch3d-0.7.8-cp310-cp310-linux_x86_64.whl" },
     { name = "simple-knn", editable = "gaussian_splatting/submodules/simple-knn" },
 ]
 playground = [
@@ -1142,6 +1144,36 @@ sdist = { url = "https://files.pythonhosted.org/packages/86/f5/8c0653e5bb54e0cbd
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fc/b8/ff33610932e0ee81ae7f1269c890f697d56ff74b9f5b2ee5d9b7fa2c5355/python_xlib-0.33-py2.py3-none-any.whl", hash = "sha256:c3534038d42e0df2f1392a1b30a15a4ff5fdc2b86cfa94f072bf11b10a164398", size = 182185, upload-time = "2022-12-25T18:52:58.662Z" },
 ]
+
+[[package]]
+name = "pytorch3d"
+version = "0.7.8"
+source = { url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt240/pytorch3d-0.7.8-cp310-cp310-linux_x86_64.whl" }
+dependencies = [
+    { name = "iopath", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+wheels = [
+    { url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt240/pytorch3d-0.7.8-cp310-cp310-linux_x86_64.whl", hash = "sha256:fa593e799a020a60507d2d92b5d60e4543b78af0372bd37136dfa81535dbfc6c" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", marker = "extra == 'implicitron'" },
+    { name = "flake8", marker = "extra == 'dev'" },
+    { name = "hydra-core", marker = "extra == 'implicitron'", specifier = ">=1.1" },
+    { name = "imageio", marker = "extra == 'all'" },
+    { name = "iopath" },
+    { name = "ipywidgets", marker = "extra == 'all'" },
+    { name = "lpips", marker = "extra == 'implicitron'" },
+    { name = "matplotlib", marker = "extra == 'all'" },
+    { name = "matplotlib", marker = "extra == 'implicitron'" },
+    { name = "sqlalchemy", marker = "extra == 'implicitron'", specifier = ">=2.0" },
+    { name = "tqdm", marker = "extra == 'all'", specifier = ">4.29.0" },
+    { name = "tqdm", marker = "extra == 'implicitron'", specifier = ">4.29.0" },
+    { name = "usort", marker = "extra == 'dev'" },
+    { name = "visdom", marker = "extra == 'implicitron'" },
+]
+provides-extras = ["all", "dev", "implicitron"]
 
 [[package]]
 name = "pytz"

@@ -27,13 +27,15 @@ uv python pin 3.10
 # Stage A
 uv sync --group core
 
-# Stage B (playground + train + gaussian native extensions)
+# Stage B (playground + train + gaussian native extensions + pytorch3d wheel)
 uv sync --group core --group playground --group gaussian --group train
 ```
 
-## PyTorch3D (post-sync, not in uv.lock)
+`pytorch3d==0.7.8` is in the `gaussian` group and locked via a direct wheel URL in
+`pyproject.toml` (`py310_cu121_pyt240`). A fresh `uv sync` installs it without a
+separate pip step.
 
-Install after `uv sync` using upstream find-links:
+### PyTorch3D fallback (only if direct wheel lock/sync fails)
 
 ```bash
 uv pip install --no-index \
@@ -42,6 +44,11 @@ uv pip install --no-index \
 ```
 
 ## Runtime environment (local validation)
+
+Run `uv sync` **before** copying `.envrc.example` → `.envrc` (or re-run `direnv allow`
+after sync). If direnv loads while `.venv` is empty or torch is not yet installed,
+`LD_LIBRARY_PATH` will not include PyTorch's `lib/` and CUDA extension imports will fail
+with errors like `libc10.so: cannot open shared object file`.
 
 ```bash
 export WANDB_MODE=offline
@@ -52,6 +59,9 @@ export LD_LIBRARY_PATH="$(
   uv run python -c 'import torch, os; print(os.path.join(os.path.dirname(torch.__file__), "lib"))'
 ):${LD_LIBRARY_PATH:-}"
 ```
+
+If using direnv: after `uv sync`, run `direnv reload` (or re-enter the directory) so
+`.envrc` re-resolves the torch lib path from the populated `.venv`.
 
 Headless import/run paths (e.g. `pynput`) need a display. Use `xvfb-run` or a local X
 server:

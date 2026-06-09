@@ -33,12 +33,13 @@ torch = [{ index = "pytorch-cu121" }]
 torchvision = [{ index = "pytorch-cu121" }]
 torchaudio = [{ index = "pytorch-cu121" }]
 warp-lang = [{ index = "nvidia" }]
+pytorch3d = { url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt240/pytorch3d-0.7.8-cp310-cp310-linux_x86_64.whl" }
 diff-gaussian-rasterization = { path = "gaussian_splatting/submodules/diff-gaussian-rasterization", editable = true }
 simple-knn = { path = "gaussian_splatting/submodules/simple-knn", editable = true }
 
 [tool.uv.extra-build-dependencies]
-diff-gaussian-rasterization = ["torch==2.4.0", "setuptools", "wheel"]
-simple-knn = ["torch==2.4.0", "setuptools", "wheel"]
+diff-gaussian-rasterization = ["torch==2.4.0", "setuptools", "wheel", "ninja"]
+simple-knn = ["torch==2.4.0", "setuptools", "wheel", "ninja"]
 
 [dependency-groups]
 core-minimal = [
@@ -82,6 +83,7 @@ gaussian = [
     "kornia",
     "plyfile",
     "einops",
+    "pytorch3d==0.7.8",
     "diff-gaussian-rasterization",
     "simple-knn",
 ]
