@@ -1,0 +1,58 @@
+[project]
+name = "phystwin"
+version = "0.1.0"
+description = "PhysTwin baseline (isolated uv env)"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qqtt*", "gaussian_splatting*"]
+
+[tool.uv]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+default-groups = []
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com/"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu121" }]
+torchvision = [{ index = "pytorch-cu121" }]
+torchaudio = [{ index = "pytorch-cu121" }]
+warp-lang = [{ index = "nvidia" }]
+
+[dependency-groups]
+core-minimal = [
+    "numpy==1.26.4",
+    "torch==2.4.0",
+    "warp-lang>=1.0.0",
+    "termcolor",
+    "tqdm",
+]
+core-media = [
+    "torchvision==0.19.0",
+    "torchaudio==2.4.0",
+    "matplotlib",
+    "opencv-python",
+    "imageio",
+    "moviepy",
+]
+core = [
+    { include-group = "core-minimal" },
+    { include-group = "core-media" },
+]
+
+# Deferred (Stage B+): playground, train, gaussian, preprocessing groups.
