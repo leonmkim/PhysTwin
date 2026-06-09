@@ -20,9 +20,10 @@ exp_name='init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0'
 for scene_name in "${scenes[@]}"; do
 
     python gs_render_dynamics.py \
-        -s ./data/gaussian_data/${scene_name} \
-        -m ./gaussian_output/${scene_name}/${exp_name} \
-        --name ${scene_name} \
+        -s "./data/gaussian_data/${scene_name}" \
+        -m "./gaussian_output/${scene_name}/${exp_name}" \
+        --name "${scene_name}" \
+        --output_dir "${output_dir}"
 
     for view_name in "${views[@]}"; do
         # Convert images to video
