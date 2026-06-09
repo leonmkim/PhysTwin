@@ -102,9 +102,9 @@ preprocessing-segmentation = [
     # See UV_INSTALL_NOTES.md Stage E; do not lock git URLs here.
 ]
 preprocessing-diffusion = [
-    "diffusers",
+    "diffusers>=0.27,<0.31",
     "accelerate",
-    "transformers",
+    "transformers<5",
 ]
 preprocessing-trellis = [
     { include-group = "preprocessing-diffusion" },
