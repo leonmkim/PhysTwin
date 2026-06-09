@@ -128,18 +128,22 @@ uv run python optimize_cma.py \
   --train_frame <frame> \
   --experiments-optimization-dir temp_experiments_optimization_uv
 
+export WANDB_MODE=disabled
+
 uv run python train_warp.py \
   --base_path ./data/different_types \
   --case_name double_stretch_sloth \
   --train_frame <frame> \
   --iterations 1 \
+  --disable-video-logging \
   --experiments-optimization-dir temp_experiments_optimization_uv \
   --reference-experiments-optimization-dir experiments_optimization \
   --experiments-dir temp_experiments_uv
 ```
 
-Use `--iterations 1` or `--iterations 2` for tiny smoke runs (default config
-iteration count is much larger).
+Use `--iterations 1` or `--iterations 2` with `--disable-video-logging` for tiny
+smoke runs when headless ffmpeg cannot encode `avc1` (default config iteration
+count is much larger). Set `WANDB_MODE=disabled` to avoid wandb overhead.
 
 Do **not** run full training/render pipelines until this patch is reviewed. Use
 `--help` on entry points and `bash -n` on shell drivers to validate parsers only.

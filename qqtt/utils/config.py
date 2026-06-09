@@ -49,6 +49,7 @@ class Config:
 
         # Other parameters for visualization
         self.overlay_path = None
+        self.disable_video_logging = False
 
     def to_dict(self):
         # Convert the class to dictionary

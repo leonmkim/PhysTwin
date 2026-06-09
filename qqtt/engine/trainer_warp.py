@@ -303,9 +303,9 @@ class InvPhyTrainerWarp:
             )
 
     def train(self, start_epoch=-1):
-        # Render the initial visualization
-        video_path = f"{cfg.base_dir}/train/init.mp4"
-        self.visualize_sim(save_only=True, video_path=video_path)
+        if not cfg.disable_video_logging:
+            video_path = f"{cfg.base_dir}/train/init.mp4"
+            self.visualize_sim(save_only=True, video_path=video_path)
 
         best_loss = None
         best_epoch = None
@@ -396,18 +396,24 @@ class InvPhyTrainerWarp:
             logger.info(f"[Train]: Iteration: {i}, Loss: {total_loss}")
 
             if i % cfg.vis_interval == 0 or i == cfg.iterations - 1:
-                video_path = f"{cfg.base_dir}/train/sim_iter{i}.mp4"
-                self.visualize_sim(save_only=True, video_path=video_path)
-                wandb.log(
-                    {
-                        "video": wandb.Video(
-                            video_path,
-                            format="mp4",
-                            fps=cfg.FPS,
-                        ),
-                    },
-                    step=i,
-                )
+                if not cfg.disable_video_logging:
+                    video_path = f"{cfg.base_dir}/train/sim_iter{i}.mp4"
+                    self.visualize_sim(save_only=True, video_path=video_path)
+                    if os.path.exists(video_path):
+                        wandb.log(
+                            {
+                                "video": wandb.Video(
+                                    video_path,
+                                    format="mp4",
+                                    fps=cfg.FPS,
+                                ),
+                            },
+                            step=i,
+                        )
+                    else:
+                        logger.warning(
+                            f"Skipping wandb video upload; missing {video_path}"
+                        )
                 # Save the parameters
                 cur_model = {
                     "epoch": i,
@@ -541,12 +547,13 @@ class InvPhyTrainerWarp:
             )
         else:
             assert video_path is not None, "Please provide the video path to save"
+            save_video = not cfg.disable_video_logging
             visualize_pc(
                 vertices[:, : self.num_all_points, :],
                 self.object_colors,
                 self.controller_points,
                 visualize=False,
-                save_video=True,
+                save_video=save_video,
                 save_path=video_path,
             )
 

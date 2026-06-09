@@ -4,6 +4,7 @@ import torch
 import time
 import cv2
 from .config import cfg
+from .logger import logger
 import pyrender
 import trimesh
 
@@ -66,10 +67,17 @@ def visualize_pc(
     if save_video and visualize:
         raise ValueError("Cannot save video and visualize at the same time.")
 
-    # Initialize video writer if save_video is True
+    video_writer = None
     if save_video:
         fourcc = cv2.VideoWriter_fourcc(*"avc1")  # Codec for .mp4 file format
         video_writer = cv2.VideoWriter(save_path, fourcc, FPS, (width, height))
+        if not video_writer.isOpened():
+            logger.warning(
+                f"cv2.VideoWriter failed to open {save_path}; skipping video frames"
+            )
+            video_writer.release()
+            video_writer = None
+            save_video = False
 
     if controller_points is not None:
         controller_meshes = []
@@ -127,7 +135,7 @@ def visualize_pc(
         vis.update_renderer()
 
         # Capture frame and write to video file if save_video is True
-        if save_video:
+        if save_video and video_writer is not None:
             frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
             frame = (frame * 255).astype(np.uint8)
             if cfg.overlay_path is not None:
@@ -145,5 +153,5 @@ def visualize_pc(
             time.sleep(1 / FPS)
 
     vis.destroy_window()
-    if save_video:
+    if video_writer is not None:
         video_writer.release()
