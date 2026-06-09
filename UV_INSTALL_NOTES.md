@@ -108,6 +108,14 @@ same scratch root (after copying or symlinking scene dirs from reference data), 
 poses will not be visible to `gs_train.py -s`. Never write `interp_poses.pkl` into
 author `data/gaussian_data` when using scratch mode.
 
+**`gs_run_simulate.sh` / `gs_run_simulate_white.sh` gaussian data coupling:**
+`gs_render_dynamics.py` loads the scene from `-s` (wired via `gaussian_data_dir`,
+default `./data/gaussian_data/<scene>`). Dataset init may rewrite `points3D.ply`
+under that path. For scratch warp + scratch Gaussian dynamic renders, set
+`GAUSSIAN_DATA_DIR=./temp_gaussian_data_uv` together with `REFERENCE_EXPERIMENTS_DIR`,
+`REFERENCE_GAUSSIAN_OUTPUT_DIR`, and `GAUSSIAN_OUTPUT_DYNAMIC_DIR` (or
+`GAUSSIAN_OUTPUT_DYNAMIC_WHITE_DIR` for the white-background script).
+
 Read author reference artifacts while writing scratch outputs:
 
 | Reference read | Flag / env |
