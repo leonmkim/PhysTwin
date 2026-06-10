@@ -749,6 +749,62 @@ interpolated views. `gs_render.py` does **not** write video; use `img2video.py` 
 
 Do not write author `data/gaussian_data/`, `gaussian_output/`, or `gaussian_output_dynamic/`.
 
+### Stage E6 dynamic render smoke (validated 2026-06-10)
+
+After E5b/E5c, `gs_render_dynamics.py` can render a motion rollout from a trained GS
+checkpoint. See parent-repo report (E6a section in
+`docs/experiments/phystwin_stage_e5_gaussian_training_render_smoke_double_stretch_sloth.md`).
+
+**Scratch root:**
+
+| Root | Purpose |
+|---|---|
+| `temp_gaussian_output_dynamic_shape_prior_uv/<case>/` | Dynamic frame PNGs (`{view_idx}/{frame:05d}.png`) |
+
+**Important caveat:** E6a smoke used **author read-only**
+`experiments/<case>/inference.pkl` via `--reference-experiments-dir`. Scratch Gaussian
+data (`-s`), scratch model (`-m`), and scratch dynamic output (`--output_dir`) were
+used for all writes. A **fully scratch dynamics chain** (scratch warp train/inference →
+scratch `inference.pkl`) is **not yet validated**.
+
+**Do not** run bare `gs_run_simulate.sh` without overrides — it defaults `-m` to author
+`gaussian_output/` and `--output_dir` only overrides the dynamic PNG root.
+
+#### Additional deps (qqtt import chain)
+
+```bash
+uv pip install pyrender cma pynput
+```
+
+#### E6a — `gs_render_dynamics.py` smoke
+
+Uses E5b scratch model (`--iteration 100`) and scratch `GAUSSIAN_DATA_DIR`. Reads warp
+trajectory from author `experiments/` (read-only).
+
+```bash
+cd third_party/phystwin
+export GAUSSIAN_DATA_DIR=./temp_gaussian_data_shape_prior_uv
+export GAUSSIAN_OUTPUT_DIR=./temp_gaussian_output_shape_prior_uv
+exp_name="init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0_smoke100"
+scene=double_stretch_sloth
+model_dir="${GAUSSIAN_OUTPUT_DIR}/${scene}/${exp_name}"
+
+timeout 7200s xvfb-run -a uv run --no-sync python gs_render_dynamics.py \
+  -s "${GAUSSIAN_DATA_DIR}/${scene}" \
+  -m "${model_dir}" \
+  --iteration 100 \
+  --name "${scene}" \
+  --output_dir ./temp_gaussian_output_dynamic_shape_prior_uv \
+  --reference-experiments-dir /path/to/phystwin/experiments
+```
+
+Validated: **~104 s**, peak GPU **~8.8 GiB**, **576** PNGs (3 test views × 192 frames),
+848×480 RGBA. Appends `rendering_finished_dynamic.txt` in repo cwd. No MP4 unless
+`img2video.py` is run separately.
+
+Do not write author `gaussian_output_dynamic/`. Route dynamic PNG writes under
+`temp_gaussian_output_dynamic_shape_prior_uv/` only.
+
 ## Author artifacts (not committed)
 
 Large datasets live on shared storage. Symlink into this directory (see canonical
