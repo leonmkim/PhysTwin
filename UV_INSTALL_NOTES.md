@@ -637,6 +637,118 @@ Never write `interp_poses.pkl` into author `data/gaussian_data` during scratch r
 Do not write author `data/` or author `data/gaussian_data/`. Route all export writes
 under `temp_gaussian_data_shape_prior_uv/` (or another explicit scratch root).
 
+### Stage E5 Gaussian prep, training, and render smoke (validated 2026-06-10)
+
+After E4b export, run pose generation (E5a), short training (E5b), and static render
+(E5c) on scratch roots only. See parent-repo report
+`docs/experiments/phystwin_stage_e5_gaussian_training_render_smoke_double_stretch_sloth.md`.
+
+**Scratch roots (validation):**
+
+| Root | Purpose |
+|---|---|
+| `temp_gaussian_data_shape_prior_uv/<case>/` | E4b export + E5a `interp_poses.pkl` + E5b `points3D.ply` side effect |
+| `temp_gaussian_output_shape_prior_uv/<case>/` | E5b checkpoints + E5c render PNGs |
+| `temp_gaussian_output_video_shape_prior_uv/` | Optional `img2video.py` output (not used by `gs_render.py`) |
+
+**Do not** run bare `gs_run.sh` without `GAUSSIAN_DATA_DIR` / `GAUSSIAN_OUTPUT_DIR`
+overrides (defaults to author paths and 10k-iter training + render).
+
+#### Gaussian venv / native deps (E5b+)
+
+Shape-prior/preprocessing venvs may lack Gaussian training packages. Minimum:
+
+```bash
+cd third_party/phystwin
+export CUDA_HOME=/usr/local/cuda-12.6
+export TORCH_CUDA_ARCH_LIST="8.9+PTX"
+
+uv sync --group core --group gaussian
+uv pip install --no-build-isolation -e gaussian_splatting/submodules/simple-knn
+uv pip install trimesh open3d
+uv pip install numpy==1.26.4 opencv-python==4.11.0.86 --force-reinstall
+```
+
+Import smoke:
+
+```bash
+export LD_LIBRARY_PATH="$(
+  uv run --no-sync python -c 'import torch, os; print(os.path.join(os.path.dirname(torch.__file__), "lib"))'
+):${LD_LIBRARY_PATH:-}"
+uv run --no-sync python -c "import gsplat, simple_knn, diff_gaussian_rasterization, cv2; print('gaussian imports OK', cv2.dilate)"
+```
+
+**Caveat:** `uv sync --group gaussian` may prune preprocessing/shape-prior packages from a
+shared venv. Prefer a dedicated Gaussian worktree/venv, or re-sync preprocessing groups
+(E2d/E3) after Gaussian work.
+
+#### Required runtime env (E5a–E5c)
+
+```bash
+export PATH="$PWD/.venv/bin:$PATH"
+export WANDB_MODE=disabled
+export LD_LIBRARY_PATH="$(
+  uv run --no-sync python -c 'import torch, os; print(os.path.join(os.path.dirname(torch.__file__), "lib"))'
+):${LD_LIBRARY_PATH:-}"
+export GAUSSIAN_DATA_DIR=./temp_gaussian_data_shape_prior_uv
+export GAUSSIAN_OUTPUT_DIR=./temp_gaussian_output_shape_prior_uv
+export GAUSSIAN_OUTPUT_VIDEO_DIR=./temp_gaussian_output_video_shape_prior_uv
+```
+
+#### E5a — `generate_interp_poses.py`
+
+No `--case-name`; iterates all scene subdirs under `--gaussian-data-dir`. Writes
+`interp_poses.pkl` **in-place** unless `--interp-poses-output-dir` is set.
+
+```bash
+cd third_party/phystwin
+uv run --no-sync python ./gaussian_splatting/generate_interp_poses.py \
+  --gaussian-data-dir ./temp_gaussian_data_shape_prior_uv
+```
+
+Required before training (`dataset_readers.py` loads `interp_poses.pkl` for test views).
+Validated: 150 `(4, 4)` float64 poses; schema matches author.
+
+#### E5b — short `gs_train.py` smoke (100 iterations)
+
+```bash
+exp_name="init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0_smoke100"
+scene=double_stretch_sloth
+
+timeout 7200s xvfb-run -a uv run --no-sync python gs_train.py \
+  -s "${GAUSSIAN_DATA_DIR}/${scene}" \
+  -m "${GAUSSIAN_OUTPUT_DIR}/${scene}/${exp_name}" \
+  --iterations 100 \
+  --test_iterations 50 100 \
+  --save_iterations 50 100 \
+  --lambda_depth 0.001 --lambda_normal 0.0 --lambda_anisotropic 0.0 --lambda_seg 1.0 \
+  --use_masks --isotropic --gs_init_opt hybrid --disable_viewer
+```
+
+Validated wall time **~148 s**; peak GPU **~2.0 GiB**; iteration-100 checkpoint
+**253,029** vertices (standard 3DGS PLY).
+
+**Side effect:** QQTT `dataset_readers.py` writes `points3D.ply` under `-s` during init.
+Safe only when `-s` is a scratch `GAUSSIAN_DATA_DIR` root — never author `data/gaussian_data/`.
+
+#### E5c — `gs_render.py` smoke
+
+```bash
+exp_name="init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0_smoke100"
+model_dir="${GAUSSIAN_OUTPUT_DIR}/double_stretch_sloth/${exp_name}"
+
+timeout 3600s xvfb-run -a uv run --no-sync python gs_render.py \
+  -s "${GAUSSIAN_DATA_DIR}/double_stretch_sloth" \
+  -m "${model_dir}" \
+  --iteration 100
+```
+
+Outputs under `{model_dir}/{train,test}/ours_100/{renders,gt}/` (306 PNGs in smoke:
+3 train + 150 test renders + GTs). Test GT images are **black placeholders** for
+interpolated views. `gs_render.py` does **not** write video; use `img2video.py` separately.
+
+Do not write author `data/gaussian_data/`, `gaussian_output/`, or `gaussian_output_dynamic/`.
+
 ## Author artifacts (not committed)
 
 Large datasets live on shared storage. Symlink into this directory (see canonical
