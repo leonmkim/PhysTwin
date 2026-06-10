@@ -338,6 +338,115 @@ Do not write author `data/`. Use `--base_path ./temp_processed_data_uv` only.
 `--group gaussian` until preprocessing is validated; add `gaussian` only for
 Stage D-style training/render work.
 
+### Stage E3 shape-prior environment (shared cache)
+
+Shape-prior stages (`image_upscale.py`, `segment_util_image.py`, `shape_prior.py`,
+`align.py`) are **not** generation-validated yet. Stage E3b covers import smoke,
+shared-cache routing, and helper setup only.
+
+**Shared cache layout** (extends segmentation cache):
+
+```text
+${PHYSTWIN_EXTERNAL_ROOT}/
+├── Grounded-SAM-2/           # segmentation (E2d)
+├── checkpoints/              # SAM2 + GroundingDINO (E2d)
+├── TRELLIS/                  # one shared git clone
+├── huggingface/              # HF_HOME / HUGGINGFACE_HUB_CACHE
+│   └── hub/
+├── superglue_weights/        # SuperPoint + SuperGlue .pth files
+└── torch_hub/                # optional TORCH_HOME
+```
+
+Default `PHYSTWIN_EXTERNAL_ROOT`:
+
+```bash
+/mnt/data2/magna/belt_perception/third_party/phystwin_external
+```
+
+**One-time TRELLIS clone** (network/git; requires explicit approval):
+
+```bash
+export PHYSTWIN_EXTERNAL_ROOT=/mnt/data2/magna/belt_perception/third_party/phystwin_external
+mkdir -p "${PHYSTWIN_EXTERNAL_ROOT}"
+git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git \
+  "${PHYSTWIN_EXTERNAL_ROOT}/TRELLIS"
+```
+
+**TRELLIS native build** (heavy; not validated in E3b — run only after approval):
+
+```bash
+cd "${PHYSTWIN_EXTERNAL_ROOT}/TRELLIS"
+. ./setup.sh --basic --xformers --flash-attn --diffoctreerast --spconv --mipgaussian --kaolin --nvdiffrast
+```
+
+**Per-worktree uv sync** (SDXL / HF stack; no TRELLIS pip lock yet):
+
+```bash
+cd third_party/phystwin
+uv sync --group core --group playground --group train \
+  --group preprocessing-core --group preprocessing-diffusion
+```
+
+`preprocessing-diffusion` pins `transformers<5` (GroundingDINO compatibility) and
+`diffusers>=0.27,<0.31` (torch 2.4 / SDXL upscale import compatibility). After sync,
+also install per-worktree GSAM editable packages (see Stage E2d) and PyTorch3D wheel
+(below) before shape-prior import smoke.
+
+**PyTorch3D wheel only** (align render path; avoid full `--group gaussian`):
+
+```bash
+cd third_party/phystwin
+uv pip install \
+  https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt240/pytorch3d-0.7.8-cp310-cp310-linux_x86_64.whl
+env -u PYTHONPATH uv run --no-sync python -c \
+  "from pytorch3d.renderer import look_at_view_transform; print('pytorch3d OK')"
+```
+
+**SuperGlue shared weights** (download once; not committed):
+
+```text
+${PHYSTWIN_EXTERNAL_ROOT}/superglue_weights/superpoint_v1.pth
+${PHYSTWIN_EXTERNAL_ROOT}/superglue_weights/superglue_indoor.pth
+${PHYSTWIN_EXTERNAL_ROOT}/superglue_weights/superglue_outdoor.pth
+```
+
+When approved, download into the shared dir (see `env_install/download_pretrained_models.sh`
+for URLs). Per-worktree symlinks are created by the helper below.
+
+**Per-worktree activation** (symlinks + cache env; no download/generation):
+
+```bash
+cd third_party/phystwin
+source scripts/setup_shape_prior_env.sh
+```
+
+For segmentation stages in the same run, also source segmentation setup:
+
+```bash
+source scripts/setup_segmentation_env.sh
+source scripts/setup_shape_prior_env.sh
+```
+
+**Manual shape-prior substage commands (E3c+; scratch `--base_path` only):**
+
+From PhysTwin repo root, `python ./data_process/align.py` and
+`python ./data_process/data_process_sample.py` resolve `from utils.align_util` via the
+script directory on `sys.path` (repo-root invocation is OK). Example:
+
+```bash
+cd third_party/phystwin
+source scripts/setup_segmentation_env.sh
+source scripts/setup_shape_prior_env.sh
+
+# E3c examples (not run in E3b):
+# uv run python ./data_process/image_upscale.py --img_path ... --output_path ...
+# uv run python ./data_process/shape_prior.py --img_path ... --output_dir ...
+# uv run python ./data_process/align.py --base_path ./temp_processed_data_allcam_uv --case_name ...
+# cd not required; prefer uv run over bare python for venv consistency
+```
+
+Do not write author `data/`. Route outputs under `temp_*_uv/{case_name}/shape/` only.
+
 ## Author artifacts (not committed)
 
 Large datasets live on shared storage. Symlink into this directory (see canonical
