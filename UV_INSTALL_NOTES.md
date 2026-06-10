@@ -347,8 +347,10 @@ dependency pins; see parent-repo report
 `docs/experiments/phystwin_stage_e_shape_prior_preprocessing_smoke_double_stretch_sloth.md`
 for per-stage commands, timings, and comparisons.
 
-**Not validated yet:** full `process_data.py` orchestration; `export_gaussian_data.py`
-from scratch `final_data.pkl`.
+**Validated (E4a–E4b, 2026-06-10):** full `process_data.py --shape_prior`
+orchestration and `export_gaussian_data.py` from scratch processed layout. See parent-repo
+report `docs/experiments/phystwin_stage_e4_process_data_and_gaussian_export_smoke_double_stretch_sloth.md`
+and **Stage E4** below.
 
 **Shared cache layout** (extends segmentation cache):
 
@@ -535,6 +537,105 @@ environments. Missing `visualization.mp4` / `final_matching.mp4` / `final_data.m
 non-fatal when primary GLB/PKL artifacts exist.
 
 Do not write author `data/`. Route outputs under `temp_*_uv/{case_name}/` only.
+
+### Stage E4 orchestration and Gaussian export (validated 2026-06-10)
+
+E4a runs the author-style `process_data.py --shape_prior` CLI on a scratch processed
+root. E4b exports Gaussian training data from that processed layout into a separate
+scratch root. **Do not** rerun export inside E4a; run export as a follow-on step.
+
+**Scratch roots used in validation:**
+
+| Root | Purpose |
+|---|---|
+| `temp_process_data_shape_prior_uv/<case>/` | E4a `process_data.py` outputs |
+| `temp_gaussian_data_shape_prior_uv/<case>/` | E4b `export_gaussian_data.py` outputs |
+
+**New worktrees:** from the parent repo, `git submodule update --init third_party/phystwin`
+if the submodule directory is empty. Install segmentation + shape-prior deps (Stages E2d,
+E3) before running. A fresh worktree venv may need the full native stack from Stage E3;
+avoid `uv sync` immediately before smoke unless revalidating native deps.
+
+#### Required environment (E4a + E4b)
+
+```bash
+cd third_party/phystwin
+unset PHYSTWIN_EXTERNAL_ROOT HF_HOME HUGGINGFACE_HUB_CACHE TORCH_HOME TRELLIS_ROOT PYTHONPATH
+export PHYSTWIN_EXTERNAL_ROOT=/mnt/data2/magna/belt_perception/third_party/phystwin_external
+source scripts/setup_segmentation_env.sh
+source scripts/setup_shape_prior_env.sh
+
+# process_data.py calls bare `python` via os.system for some substeps.
+export PATH="$PWD/.venv/bin:$PATH"
+
+export ATTN_BACKEND=xformers
+export PYTHONPATH="${GSAM_ROOT}:${TRELLIS_ROOT}:${PWD}/data_process"
+```
+
+Use `env -u PYTHONPATH` on the command line when wrapping scripts if a stale
+`PYTHONPATH` is set in the shell; then set `PYTHONPATH` as above for the run.
+
+#### E4a — full orchestration (`process_data.py`)
+
+`process_data.py` uses **underscore** CLI flags (`--base_path`, `--case_name`,
+`--timer-log`). Validated wall time **~538 s** for `double_stretch_sloth`.
+
+```bash
+cd third_party/phystwin
+
+env -u PYTHONPATH PYTHONPATH="${GSAM_ROOT}:${TRELLIS_ROOT}:${PWD}/data_process" ATTN_BACKEND=xformers \
+  timeout 7200s xvfb-run -a uv run --no-sync python ./process_data.py \
+    --base_path ./temp_process_data_shape_prior_uv \
+    --case_name double_stretch_sloth \
+    --category sloth \
+    --shape_prior \
+    --timer-log ./temp_process_data_shape_prior_uv/double_stretch_sloth/timer.log
+```
+
+Primary artifacts: `mask/`, `cotracker/`, `pcd/`, `mask/processed_masks.pkl`,
+`track_process_data.pkl`, `shape/*`, `shape/matching/final_mesh.glb`, `final_data.pkl`,
+`split.json`. Missing `final_matching.mp4` / `final_data.mp4` / `final_pcd.mp4` is
+non-fatal when GLB/PKL outputs exist (OpenCV `avc1` encoder unavailable in xvfb).
+
+#### E4b — Gaussian data export (`export_gaussian_data.py`)
+
+`export_gaussian_data.py` uses **hyphen** flags: `--base-path`, `--output-path`,
+`--case-name` (not underscore variants).
+
+**Default `--output-path` is `./data/gaussian_data` (author tree).** Always pass an
+explicit scratch `--output-path` for validation runs.
+
+Export **does not read** `final_data.pkl` or `split.json`. It reads the processed layout:
+`color/`, `depth/`, `mask/`, `pcd/`, `mask/processed_masks.pkl`, `calibrate.pkl`,
+`metadata.json`, and `shape/matching/final_mesh.glb` (when `shape_prior=True` in
+`data_config.csv`).
+
+Export **re-runs SDXL upscale and segmentation per camera** (object + human, native and
+high-res). Expect **several minutes** even when E4a preprocessing is already complete.
+Subprocesses use `sys.executable`. High-res exports are **full-frame 3392×1920** (export
+omits mask crop), unlike the cropped **1536×1536** shape-prior upscale inside
+`process_data.py`.
+
+Validated wall time **~228 s** for `double_stretch_sloth` (24 files under export root).
+
+```bash
+cd third_party/phystwin
+rm -rf ./temp_gaussian_data_shape_prior_uv
+
+env -u PYTHONPATH PYTHONPATH="${GSAM_ROOT}:${TRELLIS_ROOT}:${PWD}/data_process" \
+  timeout 7200s xvfb-run -a uv run --no-sync python ./export_gaussian_data.py \
+    --base-path ./temp_process_data_shape_prior_uv \
+    --output-path ./temp_gaussian_data_shape_prior_uv \
+    --case-name double_stretch_sloth
+```
+
+**`interp_poses.pkl`:** not created by `export_gaussian_data.py`. Author Gaussian data
+includes this file (25 files vs 24 in scratch export). Generate it separately via
+`generate_interp_poses.py` / `gs_run.sh` (see Stage C `GAUSSIAN_DATA_DIR` coupling).
+Never write `interp_poses.pkl` into author `data/gaussian_data` during scratch runs.
+
+Do not write author `data/` or author `data/gaussian_data/`. Route all export writes
+under `temp_gaussian_data_shape_prior_uv/` (or another explicit scratch root).
 
 ## Author artifacts (not committed)
 
