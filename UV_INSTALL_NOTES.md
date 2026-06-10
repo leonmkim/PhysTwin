@@ -759,13 +759,22 @@ checkpoint. See parent-repo report (E6a section in
 
 | Root | Purpose |
 |---|---|
+| `temp_process_data_shape_prior_uv/<case>/` | E4a processed case (`final_data.pkl`) — warp input |
+| `temp_experiments_optimization_shape_prior_uv/<case>/` | Scratch CMA `optimal_params.pkl` |
+| `temp_experiments_shape_prior_uv/<case>/` | Scratch warp checkpoint + `inference.pkl` |
+| `temp_gaussian_data_shape_prior_uv/<case>/` | Scratch Gaussian scene (`-s`) |
+| `temp_gaussian_output_shape_prior_uv/<case>/` | Scratch trained GS model (`-m`) |
 | `temp_gaussian_output_dynamic_shape_prior_uv/<case>/` | Dynamic frame PNGs (`{view_idx}/{frame:05d}.png`) |
 
-**Important caveat:** E6a smoke used **author read-only**
-`experiments/<case>/inference.pkl` via `--reference-experiments-dir`. Scratch Gaussian
-data (`-s`), scratch model (`-m`), and scratch dynamic output (`--output_dir`) were
-used for all writes. A **fully scratch dynamics chain** (scratch warp train/inference →
-scratch `inference.pkl`) is **not yet validated**.
+**E6a caveat (historical):** E6a used **author read-only**
+`experiments/<case>/inference.pkl` via `--reference-experiments-dir` to validate dynamic-render
+routing only.
+
+**E6c (2026-06-10):** The **fully scratch dynamic-render input path** is validated — scratch
+CMA → minimal warp train → `inference_warp.py` → scratch `inference.pkl` →
+`gs_render_dynamics.py` with `--reference-experiments-dir ./temp_experiments_shape_prior_uv`.
+Remaining caveat is **fidelity** (minimal `max_iter=2` / `iterations=2`), not routing.
+See parent-repo report section 7 (E6c).
 
 **Do not** run bare `gs_run_simulate.sh` without overrides — it defaults `-m` to author
 `gaussian_output/` and `--output_dir` only overrides the dynamic PNG root.
@@ -804,6 +813,106 @@ Validated: **~104 s**, peak GPU **~8.8 GiB**, **576** PNGs (3 test views × 192 
 
 Do not write author `gaussian_output_dynamic/`. Route dynamic PNG writes under
 `temp_gaussian_output_dynamic_shape_prior_uv/` only.
+
+#### E6c — scratch warp inference → scratch dynamic render
+
+**Prerequisite:** Stage D / author warp checkpoints are **not** portable across
+`final_data.pkl` variants. Reusing Stage D `best_199.pth` with E4a shape-prior
+`final_data.pkl` fails with:
+
+```text
+AssertionError: Check if the loaded checkpoint match the config file to connect the springs
+```
+
+Regenerate CMA params and warp training whenever processed case data changes.
+
+**Minimal smoke chain** (routing validation; not Stage D fidelity):
+
+| Step | Runtime |
+|---|---|
+| `optimize_cma.py --max_iter 2` on `temp_process_data_shape_prior_uv` | ~68 s |
+| `train_warp.py --iterations 2 --disable-video-logging` | ~15 s |
+| `inference_warp.py` → scratch `inference.pkl` | ~9 s |
+| `gs_render_dynamics.py` with scratch `--reference-experiments-dir` | ~107 s |
+
+**Environment:**
+
+```bash
+export WANDB_MODE=offline          # CMA
+export WANDB_MODE=disabled         # train_warp / inference
+export TORCH_CUDA_ARCH_LIST="8.9+PTX"
+export LD_LIBRARY_PATH="$(
+  uv run --no-sync python -c 'import torch, os; print(os.path.join(os.path.dirname(torch.__file__), "lib"))'
+):${LD_LIBRARY_PATH:-}"
+```
+
+If `train_warp.py` fails on `wandb.init` (namespace-only stub), run `uv pip install wandb`
+— no code change required.
+
+**CMA:**
+
+```bash
+cd third_party/phystwin
+xvfb-run -a uv run --no-sync python optimize_cma.py \
+  --base_path ./temp_process_data_shape_prior_uv \
+  --case_name double_stretch_sloth \
+  --train_frame 134 \
+  --max_iter 2 \
+  --experiments-optimization-dir ./temp_experiments_optimization_shape_prior_uv
+```
+
+**Warp train:**
+
+```bash
+export WANDB_MODE=disabled
+
+xvfb-run -a uv run --no-sync python train_warp.py \
+  --base_path ./temp_process_data_shape_prior_uv \
+  --case_name double_stretch_sloth \
+  --train_frame 134 \
+  --iterations 2 \
+  --disable-video-logging \
+  --experiments-optimization-dir ./temp_experiments_optimization_shape_prior_uv \
+  --experiments-dir ./temp_experiments_shape_prior_uv
+```
+
+**Inference:**
+
+```bash
+xvfb-run -a uv run --no-sync python inference_warp.py \
+  --base_path ./temp_process_data_shape_prior_uv \
+  --case_name double_stretch_sloth \
+  --experiments-optimization-dir ./temp_experiments_optimization_shape_prior_uv \
+  --reference-experiments-optimization-dir ./temp_experiments_optimization_shape_prior_uv \
+  --experiments-dir ./temp_experiments_shape_prior_uv \
+  --reference-experiments-dir ./temp_experiments_shape_prior_uv
+```
+
+Output: `temp_experiments_shape_prior_uv/double_stretch_sloth/inference.pkl`
+(scratch shape `(192, 6721, 3)` float32 vs author `(192, 6487, 3)` — expected when
+`final_data.pkl` differs). `inference.mp4` may be skipped headless (`avc1`); non-fatal.
+
+**Dynamic render (scratch inference):**
+
+```bash
+export GAUSSIAN_DATA_DIR=./temp_gaussian_data_shape_prior_uv
+export GAUSSIAN_OUTPUT_DIR=./temp_gaussian_output_shape_prior_uv
+exp_name="init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0_smoke100"
+scene=double_stretch_sloth
+model_dir="${GAUSSIAN_OUTPUT_DIR}/${scene}/${exp_name}"
+
+xvfb-run -a uv run --no-sync python gs_render_dynamics.py \
+  -s "${GAUSSIAN_DATA_DIR}/${scene}" \
+  -m "${model_dir}" \
+  --iteration 100 \
+  --name "${scene}" \
+  --output_dir ./temp_gaussian_output_dynamic_shape_prior_uv \
+  --reference-experiments-dir ./temp_experiments_shape_prior_uv
+```
+
+Validated: **576** PNGs (3 views × 192 frames), 848×480 RGBA, peak GPU **~8.8 GiB**.
+Do not read or write author `experiments/`, `gaussian_output_dynamic/`, or
+`data/different_types/` during scratch validation.
 
 ## Author artifacts (not committed)
 
