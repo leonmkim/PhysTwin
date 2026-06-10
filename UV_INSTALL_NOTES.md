@@ -340,9 +340,15 @@ Stage D-style training/render work.
 
 ### Stage E3 shape-prior environment (shared cache)
 
-Shape-prior stages (`image_upscale.py`, `segment_util_image.py`, `shape_prior.py`,
-`align.py`) are **not** generation-validated yet. Stage E3b covers import smoke,
-shared-cache routing, and helper setup only.
+Shape-prior substages (`image_upscale.py`, `segment_util_image.py`, `shape_prior.py`,
+`align.py`, `data_process_sample.py --shape_prior`) were **validated in scratch** for
+`double_stretch_sloth` (E3d–E3i, 2026-06-10). Stage E3b covers helper setup and
+dependency pins; see parent-repo report
+`docs/experiments/phystwin_stage_e_shape_prior_preprocessing_smoke_double_stretch_sloth.md`
+for per-stage commands, timings, and comparisons.
+
+**Not validated yet:** full `process_data.py` orchestration; `export_gaussian_data.py`
+from scratch `final_data.pkl`.
 
 **Shared cache layout** (extends segmentation cache):
 
@@ -372,14 +378,14 @@ git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git \
   "${PHYSTWIN_EXTERNAL_ROOT}/TRELLIS"
 ```
 
-**TRELLIS native build** (heavy; not validated in E3b — run only after approval):
+**TRELLIS `setup.sh` vs uv venv:** upstream `setup.sh --basic` calls `pip` and may
+install unpinned `transformers`. In uv worktrees, prefer explicit `uv pip install`
+(below). Preserve PhysTwin pins: `transformers<5`, `diffusers>=0.27,<0.31`.
 
-```bash
-cd "${PHYSTWIN_EXTERNAL_ROOT}/TRELLIS"
-. ./setup.sh --basic --xformers --flash-attn --diffoctreerast --spconv --mipgaussian --kaolin --nvdiffrast
-```
+**Avoid `uv sync` immediately before shape-prior smoke** unless revalidating native
+deps — sync can remove manually installed TRELLIS packages (E3f–E3g).
 
-**Per-worktree uv sync** (SDXL / HF stack; no TRELLIS pip lock yet):
+**Per-worktree uv sync** (SDXL / HF stack baseline):
 
 ```bash
 cd third_party/phystwin
@@ -387,10 +393,68 @@ uv sync --group core --group playground --group train \
   --group preprocessing-core --group preprocessing-diffusion
 ```
 
-`preprocessing-diffusion` pins `transformers<5` (GroundingDINO compatibility) and
-`diffusers>=0.27,<0.31` (torch 2.4 / SDXL upscale import compatibility). After sync,
-also install per-worktree GSAM editable packages (see Stage E2d) and PyTorch3D wheel
-(below) before shape-prior import smoke.
+`preprocessing-diffusion` pins `transformers<5` (GroundingDINO) and
+`diffusers>=0.27,<0.31` (torch 2.4 / SDXL). After sync, reinstall per-worktree GSAM
+editable packages (Stage E2d) and the native stack below.
+
+**OpenCV repair (E3d):** if `cv2.__file__` is `None` after sync:
+
+```bash
+uv pip install numpy==1.26.4 opencv-python==4.11.0.86
+```
+
+#### Validated TRELLIS native stack (E3f–E3g)
+
+Minimum for `TrellisImageTo3DPipeline` import + `from_pretrained` + `.cuda()`:
+
+```bash
+cd third_party/phystwin
+# TRELLIS setup.sh --basic equivalent (do not run bare setup.sh in uv venv)
+uv pip install pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless \
+  scipy ninja rembg onnxruntime trimesh open3d xatlas pyvista pymeshfix igraph
+uv pip install "git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8"
+uv pip install kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html
+uv pip install xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu121
+uv pip install spconv-cu120==2.3.6
+```
+
+Runtime env (match `shape_prior.py` + E3f workaround):
+
+```bash
+export ATTN_BACKEND=xformers    # required unless flash-attn is installed
+export SPCONV_ALGO=native       # shape_prior.py sets this in-script
+```
+
+Import smoke:
+
+```bash
+source scripts/setup_shape_prior_env.sh
+env -u PYTHONPATH PYTHONPATH="${TRELLIS_ROOT}:${PWD}/data_process" ATTN_BACKEND=xformers \
+  uv run --no-sync python -c \
+  "from TRELLIS.trellis.pipelines import TrellisImageTo3DPipeline; print('TRELLIS import OK')"
+```
+
+**Additional for full `shape_prior.py` generation** (E3g):
+
+```bash
+git clone --depth 1 https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast
+uv pip install --no-build-isolation /tmp/extensions/nvdiffrast
+
+git clone --depth 1 https://github.com/autonomousvision/mip-splatting.git /tmp/extensions/mip-splatting
+uv pip install --no-build-isolation /tmp/extensions/mip-splatting/submodules/diff-gaussian-rasterization/
+```
+
+`flash-attn` was **not** installed in validation; `ATTN_BACKEND=xformers` was used
+instead of `shape_prior.py`'s default `flash_attn`.
+
+**HF / Torch caches (approved downloads, shared):**
+
+| Asset | Cache path |
+|---|---|
+| SDXL upscaler | `${HF_HOME}/hub/models--stabilityai--stable-diffusion-x4-upscaler` |
+| GroundingDINO BERT | `${HF_HOME}/hub/models--bert-base-uncased` |
+| TRELLIS weights | `${HF_HOME}/hub/models--JeffreyXiang--TRELLIS-image-large` (~2.9 GB) |
+| DINOv2 cond model | `${TORCH_HOME}/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth` (~1.13 GB) |
 
 **PyTorch3D wheel only** (align render path; avoid full `--group gaussian`):
 
@@ -427,25 +491,50 @@ source scripts/setup_segmentation_env.sh
 source scripts/setup_shape_prior_env.sh
 ```
 
-**Manual shape-prior substage commands (E3c+; scratch `--base_path` only):**
-
-From PhysTwin repo root, `python ./data_process/align.py` and
-`python ./data_process/data_process_sample.py` resolve `from utils.align_util` via the
-script directory on `sys.path` (repo-root invocation is OK). Example:
+**Validated substage commands (scratch only; `double_stretch_sloth`):**
 
 ```bash
 cd third_party/phystwin
 source scripts/setup_segmentation_env.sh
 source scripts/setup_shape_prior_env.sh
+CASE=temp_processed_data_allcam_uv/double_stretch_sloth
 
-# E3c examples (not run in E3b):
-# uv run python ./data_process/image_upscale.py --img_path ... --output_path ...
-# uv run python ./data_process/shape_prior.py --img_path ... --output_dir ...
-# uv run python ./data_process/align.py --base_path ./temp_processed_data_allcam_uv --case_name ...
-# cd not required; prefer uv run over bare python for venv consistency
+# E3d SDXL upscale
+uv run python ./data_process/image_upscale.py \
+  --img_path ./${CASE}/color/0/0.png \
+  --mask_path ./${CASE}/mask/0/0/0.png \
+  --output_path ./${CASE}/shape/high_resolution.png --category sloth
+
+# E3e image segmentation (note: --img_path/--output_path, not --base_path)
+env -u PYTHONPATH PYTHONPATH="${GSAM_ROOT}:${TRELLIS_ROOT}:${PWD}/data_process" \
+  xvfb-run -a uv run python ./data_process/segment_util_image.py \
+  --img_path ./${CASE}/shape/high_resolution.png --TEXT_PROMPT sloth \
+  --output_path ./${CASE}/shape/masked_image.png
+
+# E3g TRELLIS generation
+env -u PYTHONPATH PYTHONPATH="${TRELLIS_ROOT}:${PWD}/data_process" ATTN_BACKEND=xformers \
+  xvfb-run -a uv run --no-sync python ./data_process/shape_prior.py \
+  --img_path ./${CASE}/shape/masked_image.png --output_dir ./${CASE}/shape
+
+# E3h align (remove stale matching/ first if author mesh was copied earlier)
+rm -rf ./${CASE}/shape/matching
+env -u PYTHONPATH PYTHONPATH="${TRELLIS_ROOT}:${PWD}/data_process" \
+  xvfb-run -a uv run --no-sync python ./data_process/align.py \
+  --base_path ./temp_processed_data_allcam_uv --case_name double_stretch_sloth \
+  --controller_name hand
+
+# E3i final sample
+cd data_process
+env -u PYTHONPATH PYTHONPATH="${TRELLIS_ROOT}:${PWD}" \
+  xvfb-run -a uv run --no-sync python data_process_sample.py \
+  --base_path ../temp_processed_data_allcam_uv --case_name double_stretch_sloth --shape_prior
 ```
 
-Do not write author `data/`. Route outputs under `temp_*_uv/{case_name}/shape/` only.
+**Headless MP4 caveat:** OpenCV `VideoWriter` with `avc1`/H.264 may fail in xvfb-only
+environments. Missing `visualization.mp4` / `final_matching.mp4` / `final_data.mp4` is
+non-fatal when primary GLB/PKL artifacts exist.
+
+Do not write author `data/`. Route outputs under `temp_*_uv/{case_name}/` only.
 
 ## Author artifacts (not committed)
 
