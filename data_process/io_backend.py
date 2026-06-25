@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import pickle
+import shutil
+import tempfile
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import cv2
 import numpy as np
@@ -468,3 +471,84 @@ def derive_sidecars(
         f.write("\n")
     with open(output_dir / "calibrate.pkl", "wb") as f:
         pickle.dump(c2ws, f)
+
+
+def _jpeg_window_frame_indices(
+    backend: CaseIOBackend,
+    *,
+    max_frames: int | None,
+    stride: int,
+) -> list[int]:
+    if stride < 1:
+        raise ValueError(f"stride must be >= 1, got {stride}")
+    indices = list(range(0, backend.frame_count(), stride))
+    if max_frames is not None:
+        indices = indices[: int(max_frames)]
+    return indices
+
+
+def materialize_rgb_window_as_jpegs(
+    backend: CaseIOBackend,
+    cam_id: int,
+    out_dir: str | Path,
+    *,
+    max_frames: int | None = None,
+    stride: int = 1,
+) -> int:
+    """Write backend RGB frames as zero-padded JPEGs for SAM2 directory input."""
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    frame_indices = _jpeg_window_frame_indices(
+        backend,
+        max_frames=max_frames,
+        stride=stride,
+    )
+    for out_idx, frame_idx in enumerate(frame_indices):
+        rgb = backend.get_rgb(cam_id, frame_idx)
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        filename = f"{out_idx:05d}.jpg"
+        if not cv2.imwrite(
+            str(out_path / filename),
+            bgr,
+            [int(cv2.IMWRITE_JPEG_QUALITY), 100],
+        ):
+            raise OSError(f"Failed to write JPEG: {out_path / filename}")
+    written = sorted(
+        p.name
+        for p in out_path.iterdir()
+        if p.suffix.lower() in {".jpg", ".jpeg"}
+    )
+    expected = [f"{i:05d}.jpg" for i in range(len(frame_indices))]
+    if written != expected:
+        raise RuntimeError(
+            f"JPEG lexical order mismatch: expected {expected}, got {written}"
+        )
+    return len(frame_indices)
+
+
+@contextmanager
+def transient_jpeg_window(
+    backend: CaseIOBackend,
+    cam_id: int,
+    *,
+    max_frames: int | None = None,
+    stride: int = 1,
+    root: str | Path = "/tmp",
+    keep: bool = False,
+) -> Iterator[tuple[Path, int]]:
+    """Materialize a transient JPEG directory; delete on exit unless keep=True."""
+    frame_dir = Path(
+        tempfile.mkdtemp(prefix="phystwin_jpeg_window_", dir=str(root))
+    )
+    try:
+        frame_count = materialize_rgb_window_as_jpegs(
+            backend,
+            cam_id,
+            frame_dir,
+            max_frames=max_frames,
+            stride=stride,
+        )
+        yield frame_dir, frame_count
+    finally:
+        if not keep and frame_dir.exists():
+            shutil.rmtree(frame_dir, ignore_errors=True)
