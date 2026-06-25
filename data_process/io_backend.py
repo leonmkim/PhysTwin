@@ -10,6 +10,7 @@ import json
 import pickle
 import shutil
 import tempfile
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ class ConvertedSessionDescriptor:
     target_fps: float | None = None
     stride: int | None = None
     max_frames: int | None = None
+    start_sync_index: int = 0
+    end_sync_index_exclusive: int | None = None
 
     def __post_init__(self) -> None:
         if not self.camera_serials:
@@ -45,6 +48,27 @@ class ConvertedSessionDescriptor:
             raise ValueError(f"stride must be >= 1, got {self.stride}")
         if self.target_fps is not None and float(self.target_fps) <= 0:
             raise ValueError(f"target_fps must be positive, got {self.target_fps}")
+        if int(self.start_sync_index) < 0:
+            raise ValueError(
+                f"start_sync_index must be >= 0, got {self.start_sync_index}"
+            )
+        if self.end_sync_index_exclusive is not None and int(
+            self.end_sync_index_exclusive
+        ) <= int(self.start_sync_index):
+            raise ValueError(
+                "end_sync_index_exclusive must be greater than start_sync_index "
+                f"({self.start_sync_index} >= {self.end_sync_index_exclusive})"
+            )
+        non_default_window = int(self.start_sync_index) != 0 or (
+            self.end_sync_index_exclusive is not None
+        )
+        if self.target_fps is not None and non_default_window:
+            raise ValueError(
+                "target_fps cannot be combined with a native sync-index window "
+                "(start_sync_index != 0 or end_sync_index_exclusive is set). "
+                "Window indices refer to the native anchor-overlap grid; use stride "
+                "instead of target_fps when trimming converted sessions."
+            )
 
     @property
     def anchor_color_stream_id(self) -> str:
@@ -226,7 +250,20 @@ class ConvertedSessionBackend(CaseIOBackend):
         self._stride = int(descriptor.stride) if descriptor.stride is not None else 1
         raw_count = int(self._loader.num_sync_samples())
         self._raw_frame_count = raw_count
-        effective = (raw_count + self._stride - 1) // self._stride
+        start = int(descriptor.start_sync_index)
+        end = (
+            int(descriptor.end_sync_index_exclusive)
+            if descriptor.end_sync_index_exclusive is not None
+            else raw_count
+        )
+        if not (0 <= start < end <= raw_count):
+            raise ValueError(
+                "sync-index window must satisfy 0 <= start < end <= raw_count "
+                f"(start={start}, end={end}, raw_count={raw_count})"
+            )
+        self._start = start
+        window_count = end - start
+        effective = (window_count + self._stride - 1) // self._stride
         if descriptor.max_frames is not None:
             effective = min(effective, int(descriptor.max_frames))
         self._frame_count = effective
@@ -249,13 +286,11 @@ class ConvertedSessionBackend(CaseIOBackend):
         return list(self._serial_by_cam.keys())
 
     def frame_count(self) -> int:
-        """Anchor-frame samples in the all-camera overlap window.
-
-        Counts anchor-stream sync samples within ``TimeRange.overlap()``, then
-        applies optional ``stride`` and ``max_frames`` caps from the descriptor.
-        Full-anchor range or ``target_fps`` resampling are separate explicit modes.
-        """
+        """Exposed frame count after optional sync-index window, stride, and max_frames."""
         return self._frame_count
+
+    def window_start_sync_index(self) -> int:
+        return self._start
 
     def raw_sync_sample_count(self) -> int:
         return self._raw_frame_count
@@ -279,7 +314,7 @@ class ConvertedSessionBackend(CaseIOBackend):
     def _loader_index(self, frame_idx: int) -> int:
         if frame_idx < 0 or frame_idx >= self._frame_count:
             raise IndexError(f"frame_idx {frame_idx} out of range [0, {self._frame_count})")
-        return int(frame_idx) * self._stride
+        return self._start + int(frame_idx) * self._stride
 
     def _get_sample(self, frame_idx: int):
         loader_idx = self._loader_index(frame_idx)
@@ -353,6 +388,59 @@ def parse_camera_serials(value: str | None) -> list[str]:
     return [part.strip() for part in str(value).split(",") if part.strip()]
 
 
+def _read_window_yaml(
+    path: str | Path,
+    *,
+    expected_session_id: str | None = None,
+) -> tuple[int, int]:
+    import yaml
+
+    window_path = Path(path)
+    if not window_path.is_file():
+        raise FileNotFoundError(f"window yaml not found: {window_path}")
+    with open(window_path, encoding="utf-8") as f:
+        payload = yaml.safe_load(f)
+    if not isinstance(payload, dict):
+        raise ValueError(f"window yaml must parse to a mapping: {window_path}")
+    if payload.get("schema_version") != 1:
+        raise ValueError(
+            f"window yaml schema_version must be 1, got {payload.get('schema_version')!r}"
+        )
+    if payload.get("kind") != "phystwin_interaction_window":
+        raise ValueError(
+            f"window yaml kind must be phystwin_interaction_window, got {payload.get('kind')!r}"
+        )
+    session = payload.get("session")
+    if isinstance(session, dict) and expected_session_id is not None:
+        yaml_session_id = session.get("session_id")
+        if yaml_session_id is not None and str(yaml_session_id) != str(expected_session_id):
+            warnings.warn(
+                f"window yaml session_id {yaml_session_id!r} differs from "
+                f"converted session directory {expected_session_id!r}",
+                stacklevel=2,
+            )
+    resolved = payload.get("resolved_window")
+    if not isinstance(resolved, dict):
+        raise ValueError(f"window yaml missing resolved_window mapping: {window_path}")
+    if "start_sync_index" not in resolved or "end_sync_index_exclusive" not in resolved:
+        raise ValueError(
+            "window yaml resolved_window must include start_sync_index and "
+            f"end_sync_index_exclusive: {window_path}"
+        )
+    start = resolved["start_sync_index"]
+    end = resolved["end_sync_index_exclusive"]
+    if not isinstance(start, int) or isinstance(start, bool):
+        raise ValueError(f"start_sync_index must be int, got {start!r}")
+    if not isinstance(end, int) or isinstance(end, bool):
+        raise ValueError(f"end_sync_index_exclusive must be int, got {end!r}")
+    if start >= end:
+        raise ValueError(
+            f"window yaml requires start_sync_index < end_sync_index_exclusive "
+            f"({start} >= {end})"
+        )
+    return start, end
+
+
 def create_io_backend(
     *,
     io_backend: str = DEFAULT_IO_BACKEND,
@@ -365,6 +453,9 @@ def create_io_backend(
     target_fps: float | None = None,
     stride: int | None = None,
     max_frames: int | None = None,
+    window_yaml: str | Path | None = None,
+    start_sync_index: int | None = None,
+    end_sync_index_exclusive: int | None = None,
 ) -> CaseIOBackend:
     backend = (io_backend or DEFAULT_IO_BACKEND).strip()
     if backend == DEFAULT_IO_BACKEND:
@@ -381,14 +472,34 @@ def create_io_backend(
         )
         if not serials:
             raise ValueError("--camera-serials is required for converted_session backend")
+        session_path = Path(converted_session_path)
+        yaml_start: int | None = None
+        yaml_end: int | None = None
+        if window_yaml is not None:
+            yaml_start, yaml_end = _read_window_yaml(
+                window_yaml,
+                expected_session_id=session_path.name,
+            )
+        resolved_start = (
+            int(start_sync_index)
+            if start_sync_index is not None
+            else (yaml_start if yaml_start is not None else 0)
+        )
+        resolved_end = (
+            int(end_sync_index_exclusive)
+            if end_sync_index_exclusive is not None
+            else yaml_end
+        )
         descriptor = ConvertedSessionDescriptor(
-            session_path=Path(converted_session_path),
+            session_path=session_path,
             camera_serials=tuple(serials),
             anchor_serial=anchor_serial,
             anchor_stream_id=anchor_stream_id,
             target_fps=target_fps,
             stride=stride,
             max_frames=max_frames,
+            start_sync_index=resolved_start,
+            end_sync_index_exclusive=resolved_end,
         )
         return ConvertedSessionBackend(descriptor)
     raise ValueError(f"Unknown io_backend: {backend!r}")
@@ -443,6 +554,24 @@ def add_io_backend_args(parser) -> None:
         type=int,
         default=None,
         help="Optional cap on frames processed (smoke tests).",
+    )
+    parser.add_argument(
+        "--window-yaml",
+        type=str,
+        default=None,
+        help="PhysTwin interaction-window sidecar (metadata/phystwin_window.yaml).",
+    )
+    parser.add_argument(
+        "--start-sync-index",
+        type=int,
+        default=None,
+        help="Native anchor-overlap sync index (inclusive). Overrides YAML start when set.",
+    )
+    parser.add_argument(
+        "--end-sync-index-exclusive",
+        type=int,
+        default=None,
+        help="Native anchor-overlap sync index (exclusive). Overrides YAML end when set.",
     )
 
 

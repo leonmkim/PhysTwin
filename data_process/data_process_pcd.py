@@ -38,6 +38,9 @@ io = create_io_backend(
     target_fps=args.target_fps,
     stride=args.stride,
     max_frames=args.max_frames,
+    window_yaml=args.window_yaml,
+    start_sync_index=args.start_sync_index,
+    end_sync_index_exclusive=args.end_sync_index_exclusive,
 )
 
 
