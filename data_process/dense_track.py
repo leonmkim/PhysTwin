@@ -136,6 +136,7 @@ def _converted_session_track(case_dir: str | Path) -> None:
         target_fps=args.target_fps,
         stride=args.stride,
         max_frames=args.max_frames,
+        world_transform=args.world_transform,
     )
     cam_id = int(args.camera_idx)
     frame_count = backend.frame_count()

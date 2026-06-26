@@ -22,6 +22,9 @@ import numpy as np
 
 DEFAULT_IO_BACKEND = "phystwin_file_tree"
 ZED_DEPTH_STREAM_SUFFIX = "depth_zed_sdk_neural_plus"
+WORLD_TRANSFORM_NONE = "none"
+WORLD_TRANSFORM_PHYS_TWIN_Z_UP = "phys_twin_z_up"
+WORLD_TRANSFORM_CHOICES = (WORLD_TRANSFORM_NONE, WORLD_TRANSFORM_PHYS_TWIN_Z_UP)
 
 
 @dataclass(frozen=True)
@@ -38,10 +41,12 @@ class ConvertedSessionDescriptor:
     max_frames: int | None = None
     start_sync_index: int = 0
     end_sync_index_exclusive: int | None = None
+    world_transform: str = WORLD_TRANSFORM_NONE
 
     def __post_init__(self) -> None:
         if not self.camera_serials:
             raise ValueError("camera_serials must not be empty")
+        parse_world_transform(self.world_transform)
         if self.target_fps is not None and self.stride is not None:
             raise ValueError("Specify at most one of target_fps or stride")
         if self.stride is not None and int(self.stride) < 1:
@@ -270,6 +275,10 @@ class ConvertedSessionBackend(CaseIOBackend):
 
         wT_path = Path(descriptor.session_path) / "metadata" / "calibration_package" / "world_T_camera_by_serial.npz"
         self._world_T_camera_by_serial = np.load(wT_path)
+        self._world_transform_name = parse_world_transform(descriptor.world_transform)
+        self._world_T_pt_from_conv = resolve_world_transform_matrix(
+            self._world_transform_name
+        )
         self._fps_value = self._estimate_native_fps()
         self._sample_cache: dict[int, Any] = {}
 
@@ -368,7 +377,13 @@ class ConvertedSessionBackend(CaseIOBackend):
 
     def get_c2w(self, cam_id: int) -> np.ndarray:
         serial = self._serial_by_cam[cam_id]
-        return np.asarray(self._world_T_camera_by_serial[serial], dtype=np.float64)
+        c2w = np.asarray(self._world_T_camera_by_serial[serial], dtype=np.float64)
+        if self._world_T_pt_from_conv is not None:
+            c2w = self._world_T_pt_from_conv @ c2w
+        return c2w
+
+    def world_transform_name(self) -> str:
+        return self._world_transform_name
 
     def source_frame_index(self, cam_id: int, frame_idx: int) -> int | None:
         sample = self._get_sample(frame_idx)
@@ -386,6 +401,33 @@ def parse_camera_serials(value: str | None) -> list[str]:
     if value is None or not str(value).strip():
         return []
     return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
+def parse_world_transform(value: str | None) -> str:
+    name = (value or WORLD_TRANSFORM_NONE).strip()
+    if name not in WORLD_TRANSFORM_CHOICES:
+        raise ValueError(
+            f"world_transform must be one of {WORLD_TRANSFORM_CHOICES}, got {name!r}"
+        )
+    return name
+
+
+def resolve_world_transform_matrix(name: str) -> np.ndarray | None:
+    """Return 4x4 T_pt_from_conv, or None when name is ``none``."""
+    parsed = parse_world_transform(name)
+    if parsed == WORLD_TRANSFORM_NONE:
+        return None
+    if parsed == WORLD_TRANSFORM_PHYS_TWIN_Z_UP:
+        return np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=np.float64,
+        )
+    raise ValueError(f"unsupported world_transform: {parsed!r}")
 
 
 def _read_window_yaml(
@@ -456,6 +498,7 @@ def create_io_backend(
     window_yaml: str | Path | None = None,
     start_sync_index: int | None = None,
     end_sync_index_exclusive: int | None = None,
+    world_transform: str | None = None,
 ) -> CaseIOBackend:
     backend = (io_backend or DEFAULT_IO_BACKEND).strip()
     if backend == DEFAULT_IO_BACKEND:
@@ -500,6 +543,7 @@ def create_io_backend(
             max_frames=max_frames,
             start_sync_index=resolved_start,
             end_sync_index_exclusive=resolved_end,
+            world_transform=parse_world_transform(world_transform),
         )
         return ConvertedSessionBackend(descriptor)
     raise ValueError(f"Unknown io_backend: {backend!r}")
@@ -573,20 +617,55 @@ def add_io_backend_args(parser) -> None:
         default=None,
         help="Native anchor-overlap sync index (exclusive). Overrides YAML end when set.",
     )
+    parser.add_argument(
+        "--world-transform",
+        type=str,
+        default=WORLD_TRANSFORM_NONE,
+        choices=list(WORLD_TRANSFORM_CHOICES),
+        help=(
+            "Optional rigid world-frame remap for converted_session c2w only "
+            f"(default: {WORLD_TRANSFORM_NONE})."
+        ),
+    )
 
 
 def derive_sidecars(
     descriptor: ConvertedSessionDescriptor,
     output_dir: Path,
+    *,
+    window_yaml: str | Path | None = None,
 ) -> None:
-    """Optional scratch sidecars (metadata.json + calibrate.pkl). Not used by default."""
+    """Write minimal PhysTwin case sidecars (metadata, calibrate, color/0/0.png, shape/)."""
+    materialize_phys_twin_sidecars(
+        descriptor,
+        output_dir,
+        window_yaml=window_yaml,
+    )
+
+
+def materialize_phys_twin_sidecars(
+    descriptor: ConvertedSessionDescriptor,
+    output_dir: Path,
+    *,
+    window_yaml: str | Path | None = None,
+) -> None:
+    """Scratch sidecars for shape-prior / align without a full RGB cache."""
     backend = ConvertedSessionBackend(descriptor)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    color_dir = output_dir / "color" / "0"
+    color_dir.mkdir(parents=True, exist_ok=True)
+    rgb0 = backend.get_rgb(0, 0)
+    bgr0 = cv2.cvtColor(rgb0, cv2.COLOR_RGB2BGR)
+    if not cv2.imwrite(str(color_dir / "0.png"), bgr0):
+        raise OSError(f"Failed to write reference color frame: {color_dir / '0.png'}")
+
+    (output_dir / "shape" / "matching").mkdir(parents=True, exist_ok=True)
+
     intrinsics = [backend.get_intrinsics(cam_id).tolist() for cam_id in backend.camera_ids()]
     c2ws = [backend.get_c2w(cam_id).tolist() for cam_id in backend.camera_ids()]
-    rgb0 = backend.get_rgb(0, 0)
-    metadata = {
+    metadata: dict[str, Any] = {
         "intrinsics": intrinsics,
         "WH": [int(rgb0.shape[1]), int(rgb0.shape[0])],
         "frame_num": backend.frame_count(),
@@ -594,7 +673,21 @@ def derive_sidecars(
         "serial_numbers": backend.serial_numbers(),
         "source": "converted_session",
         "session_path": str(descriptor.session_path),
+        "camera_serials": list(descriptor.camera_serials),
+        "world_transform_name": backend.world_transform_name(),
     }
+    world_T = resolve_world_transform_matrix(backend.world_transform_name())
+    if world_T is not None:
+        metadata["world_transform_matrix"] = world_T.tolist()
+    if window_yaml is not None:
+        window_path = Path(window_yaml)
+        metadata["window_yaml"] = str(window_path)
+        start, end = _read_window_yaml(
+            window_path,
+            expected_session_id=descriptor.session_path.name,
+        )
+        metadata["start_sync_index"] = start
+        metadata["end_sync_index_exclusive"] = end
     with open(output_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
         f.write("\n")
