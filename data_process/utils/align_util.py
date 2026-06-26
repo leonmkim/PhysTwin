@@ -158,6 +158,7 @@ def sample_camera_poses(radius, num_samples, num_up_samples=4, device="cpu"):
     return torch.tensor(np.array(camera_poses), device=device)
 
 
+@torch.inference_mode()
 def render_image(mesh, camera_poses, width=640, height=480, fov=1, device="cpu"):
     from pytorch3d.io import IO
     from pytorch3d.io.experimental_gltf_io import MeshGlbFormat
@@ -226,6 +227,7 @@ def render_image(mesh, camera_poses, width=640, height=480, fov=1, device="cpu")
     return color, depth
 
 
+@torch.inference_mode()
 def render_multi_images(
     mesh,
     width=640,
@@ -235,7 +237,11 @@ def render_multi_images(
     num_samples=6,
     num_ups=2,
     device="cpu",
+    render_batch_size=16,
 ):
+    if render_batch_size < 1:
+        raise ValueError(f"render_batch_size must be >= 1, got {render_batch_size}")
+
     # Sample camera poses
     camera_poses = sample_camera_poses(radius, num_samples, num_ups, device)
 
@@ -246,15 +252,19 @@ def render_multi_images(
     camera_intrinsics = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
 
     num_cameras = camera_poses.shape[0]
+    colors = []
+    depths = []
+    for start in range(0, num_cameras, render_batch_size):
+        end = min(start + render_batch_size, num_cameras)
+        color_chunk, depth_chunk = render_image(
+            mesh, camera_poses[start:end], width, height, fov, device
+        )
+        colors.append(color_chunk)
+        depths.append(depth_chunk)
+        if device == "cuda" and torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
 
-    # Render two times to avoid memory overflow
-    split = num_cameras // 2
-    color1, depth1 = render_image(
-        mesh, camera_poses[:split], width, height, fov, device
-    )
-    color2, depth2 = render_image(
-        mesh, camera_poses[split:], width, height, fov, device
-    )
-    color = np.concatenate([color1, color2], axis=0)
-    depth = np.concatenate([depth1, depth2], axis=0)
+    color = np.concatenate(colors, axis=0)
+    depth = np.concatenate(depths, axis=0)
     return color, depth, camera_poses, camera_intrinsics
