@@ -32,16 +32,28 @@ parser.add_argument("--case_name", type=str, required=True)
 parser.add_argument("--controller_name", type=str, required=True)
 parser.add_argument(
     "--render-device",
-    choices=("cuda", "cpu"),
+    choices=("cuda", "cpu", "auto"),
     default="cuda",
-    help="Device for pytorch3d mesh rendering only (default: cuda).",
+    help=(
+        "Device for pytorch3d mesh rendering only (default: cuda). "
+        "'auto' tries CUDA first and falls back to CPU on OOM during pose-selection render."
+    ),
+)
+parser.add_argument(
+    "--render-batch-size",
+    type=int,
+    default=16,
+    help="Pose-selection render chunk size for render_multi_images (default: 16).",
 )
 args = parser.parse_args()
+if args.render_batch_size < 1:
+    parser.error("--render-batch-size must be >= 1")
 
 base_path = args.base_path
 case_name = args.case_name
 CONTROLLER_NAME = args.controller_name
 RENDER_DEVICE = args.render_device
+RENDER_BATCH_SIZE = args.render_batch_size
 output_dir = f"{base_path}/{case_name}/shape/matching"
 
 
@@ -70,24 +82,56 @@ def _processed_mask_camera_indices(frame_masks, num_pcd_cams):
 
 
 def pose_selection_render_superglue(
-    raw_img, fov, mesh_path, mesh, crop_img, output_dir, render_device="cuda"
+    raw_img,
+    fov,
+    mesh_path,
+    mesh,
+    crop_img,
+    output_dir,
+    render_device="cuda",
+    render_batch_size=16,
 ):
     # Calculate suitable rendering radius
     bounding_box = mesh.bounds
     max_dimension = np.linalg.norm(bounding_box[1] - bounding_box[0])
     radius = 2 * (max_dimension / 2) / np.tan(fov / 2)
 
-    # Render multimle images and feature matching
-    colors, depths, camera_poses, camera_intrinsics = render_multi_images(
-        mesh_path,
-        raw_img.shape[1],
-        raw_img.shape[0],
-        fov,
+    render_kwargs = dict(
+        mesh=mesh_path,
+        width=raw_img.shape[1],
+        height=raw_img.shape[0],
+        fov=fov,
         radius=radius,
         num_samples=8,
         num_ups=4,
-        device=render_device,
+        render_batch_size=render_batch_size,
     )
+    devices_to_try = [render_device]
+    if render_device == "auto":
+        devices_to_try = ["cuda", "cpu"]
+
+    colors = depths = camera_poses = camera_intrinsics = None
+    for device in devices_to_try:
+        try:
+            colors, depths, camera_poses, camera_intrinsics = render_multi_images(
+                **render_kwargs,
+                device=device,
+            )
+            break
+        except torch.cuda.OutOfMemoryError:
+            if device != "cuda" or render_device != "auto":
+                raise
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+            print(
+                "CUDA OOM during pose-selection render; falling back to CPU",
+                flush=True,
+            )
+    if colors is None:
+        raise RuntimeError("pose-selection render failed without producing outputs")
+
+    # Render multimle images and feature matching
     grays = [cv2.cvtColor(color, cv2.COLOR_BGR2GRAY) for color in colors]
     # Use superglue to match the features
     best_idx, match_result = image_pair_matching(
@@ -371,6 +415,7 @@ if __name__ == "__main__":
                 crop_img,
                 output_dir=output_dir,
                 render_device=RENDER_DEVICE,
+                render_batch_size=RENDER_BATCH_SIZE,
             )
         )
         with open(f"{output_dir}/best_match.pkl", "wb") as f:
@@ -434,13 +479,14 @@ if __name__ == "__main__":
         pnp_camera_pose[:3, :3] = np.linalg.inv(mesh2raw_camera[:3, :3])
         pnp_camera_pose[3, :3] = mesh2raw_camera[:3, 3]
         pnp_camera_pose[:, :2] = -pnp_camera_pose[:, :2]
+        pnp_render_device = "cuda" if RENDER_DEVICE == "auto" else RENDER_DEVICE
         color, depth = render_image(
             mesh_path,
             pnp_camera_pose,
             raw_img.shape[1],
             raw_img.shape[0],
             fov,
-            RENDER_DEVICE,
+            pnp_render_device,
         )
         vis_mask = depth > 0
         color[0][~vis_mask] = raw_img[~vis_mask]
