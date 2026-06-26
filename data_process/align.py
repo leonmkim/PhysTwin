@@ -30,11 +30,18 @@ parser.add_argument(
 )
 parser.add_argument("--case_name", type=str, required=True)
 parser.add_argument("--controller_name", type=str, required=True)
+parser.add_argument(
+    "--render-device",
+    choices=("cuda", "cpu"),
+    default="cuda",
+    help="Device for pytorch3d mesh rendering only (default: cuda).",
+)
 args = parser.parse_args()
 
 base_path = args.base_path
 case_name = args.case_name
 CONTROLLER_NAME = args.controller_name
+RENDER_DEVICE = args.render_device
 output_dir = f"{base_path}/{case_name}/shape/matching"
 
 
@@ -43,8 +50,27 @@ def existDir(dir_path):
         os.makedirs(dir_path)
 
 
+def _processed_mask_camera_indices(frame_masks, num_pcd_cams):
+    """Return sorted PCD camera indices with valid object masks in frame_masks."""
+    indices = []
+    for key, entry in frame_masks.items():
+        if not isinstance(entry, dict) or "object" not in entry:
+            continue
+        try:
+            cam_i = int(key)
+        except (TypeError, ValueError):
+            continue
+        if cam_i < 0 or cam_i >= num_pcd_cams:
+            continue
+        mask = entry["object"]
+        if not isinstance(mask, np.ndarray):
+            continue
+        indices.append(cam_i)
+    return sorted(set(indices))
+
+
 def pose_selection_render_superglue(
-    raw_img, fov, mesh_path, mesh, crop_img, output_dir
+    raw_img, fov, mesh_path, mesh, crop_img, output_dir, render_device="cuda"
 ):
     # Calculate suitable rendering radius
     bounding_box = mesh.bounds
@@ -60,7 +86,7 @@ def pose_selection_render_superglue(
         radius=radius,
         num_samples=8,
         num_ups=4,
-        device="cuda",
+        device=render_device,
     )
     grays = [cv2.cvtColor(color, cv2.COLOR_BGR2GRAY) for color in colors]
     # Use superglue to match the features
@@ -344,6 +370,7 @@ if __name__ == "__main__":
                 mesh,
                 crop_img,
                 output_dir=output_dir,
+                render_device=RENDER_DEVICE,
             )
         )
         with open(f"{output_dir}/best_match.pkl", "wb") as f:
@@ -408,7 +435,12 @@ if __name__ == "__main__":
         pnp_camera_pose[3, :3] = mesh2raw_camera[:3, 3]
         pnp_camera_pose[:, :2] = -pnp_camera_pose[:, :2]
         color, depth = render_image(
-            mesh_path, pnp_camera_pose, raw_img.shape[1], raw_img.shape[0], fov, "cuda"
+            mesh_path,
+            pnp_camera_pose,
+            raw_img.shape[1],
+            raw_img.shape[0],
+            fov,
+            RENDER_DEVICE,
         )
         vis_mask = depth > 0
         color[0][~vis_mask] = raw_img[~vis_mask]
@@ -431,15 +463,31 @@ if __name__ == "__main__":
     data = np.load(pcd_path)
     with open(mask_path, "rb") as f:
         processed_masks = pickle.load(f)
-    for i in range(3):
+    if 0 not in processed_masks:
+        raise KeyError("processed_masks is missing frame index 0")
+    mask_camera_indices = _processed_mask_camera_indices(
+        processed_masks[0], len(data["points"])
+    )
+    if not mask_camera_indices:
+        raise ValueError(
+            "processed_masks[0] has no valid per-camera object masks "
+            f"(pcd cameras={len(data['points'])})"
+        )
+    first_points = None
+    first_mask = None
+    for i in mask_camera_indices:
         points = data["points"][i]
         colors = data["colors"][i]
         mask = processed_masks[0][i]["object"]
         obs_points.append(points[mask])
         obs_colors.append(colors[mask])
-        if i == 0:
+        if i == cam_idx:
             first_points = points
             first_mask = mask
+    if first_points is None or first_mask is None:
+        raise KeyError(
+            f"processed_masks[0] is missing object mask for align camera {cam_idx}"
+        )
 
     obs_points = np.vstack(obs_points)
     obs_colors = np.vstack(obs_colors)
