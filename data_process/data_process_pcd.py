@@ -41,6 +41,7 @@ io = create_io_backend(
     window_yaml=args.window_yaml,
     start_sync_index=args.start_sync_index,
     end_sync_index_exclusive=args.end_sync_index_exclusive,
+    world_transform=args.world_transform,
 )
 
 

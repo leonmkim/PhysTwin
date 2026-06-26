@@ -15,6 +15,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -202,3 +203,56 @@ def test_window_matches_annotated_yaml():
             window_yaml=str(yaml_path),
             target_fps=15.0,
         )
+
+
+def test_world_transform_matrix_phys_twin_z_up():
+    T = M.resolve_world_transform_matrix(M.WORLD_TRANSFORM_PHYS_TWIN_Z_UP)
+    assert T is not None
+    R = T[:3, :3]
+    expected = np.diag([1.0, -1.0, -1.0])
+    assert np.allclose(R, expected)
+    assert abs(float(np.linalg.det(R)) - 1.0) < 1e-12
+    assert np.allclose(R @ R.T, np.eye(3))
+
+
+def test_world_transform_none_is_identity():
+    assert M.resolve_world_transform_matrix(M.WORLD_TRANSFORM_NONE) is None
+
+
+def test_get_c2w_world_transform_applies_rx180(monkeypatch):
+    identity = np.eye(4, dtype=np.float64)
+    identity[0, 3] = 1.0
+    identity[1, 3] = 2.0
+    identity[2, 3] = 3.0
+
+    class _StubBackend(M.ConvertedSessionBackend):
+        def __init__(self, descriptor):
+            self._descriptor = descriptor
+            self._serial_by_cam = {0: "12540311"}
+            self._world_transform_name = M.parse_world_transform(descriptor.world_transform)
+            self._world_T_pt_from_conv = M.resolve_world_transform_matrix(
+                self._world_transform_name
+            )
+            self._world_T_camera_by_serial = {"12540311": identity.copy()}
+
+        def get_c2w(self, cam_id: int) -> np.ndarray:
+            serial = self._serial_by_cam[cam_id]
+            c2w = np.asarray(self._world_T_camera_by_serial[serial], dtype=np.float64)
+            if self._world_T_pt_from_conv is not None:
+                c2w = self._world_T_pt_from_conv @ c2w
+            return c2w
+
+    desc_none = M.ConvertedSessionDescriptor(
+        session_path=Path("/x"),
+        camera_serials=("12540311",),
+        world_transform=M.WORLD_TRANSFORM_NONE,
+    )
+    desc_phys = M.ConvertedSessionDescriptor(
+        session_path=Path("/x"),
+        camera_serials=("12540311",),
+        world_transform=M.WORLD_TRANSFORM_PHYS_TWIN_Z_UP,
+    )
+    b0 = _StubBackend(desc_none)
+    b1 = _StubBackend(desc_phys)
+    assert np.allclose(b0.get_c2w(0), identity)
+    assert np.allclose(b1.get_c2w(0), M.resolve_world_transform_matrix(M.WORLD_TRANSFORM_PHYS_TWIN_Z_UP) @ identity)
