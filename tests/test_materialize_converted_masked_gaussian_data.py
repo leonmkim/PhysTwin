@@ -62,3 +62,22 @@ def test_overwrite_guard(tmp_path):
     case_dir.mkdir()
     with pytest.raises(FileExistsError, match="already exists"):
         base._prepare_case_dir(case_dir, overwrite=False)
+
+
+def test_masked_materializer_rejects_traversal_before_file_io(tmp_path):
+    (tmp_path / "out").mkdir()
+    with pytest.raises(ValueError, match="case_name|case_dir"):
+        M.materialize_converted_masked_gaussian_data(
+            converted_session_path=tmp_path / "session",
+            window_yaml=tmp_path / "w.yaml",
+            camera_serials=["1", "2", "3"],
+            anchor_serial="1",
+            out_root=tmp_path / "out",
+            case_name="../escape",
+            shape_prior_glb=tmp_path / "missing.glb",
+            cam0_object_mask=tmp_path / "missing_obj.png",
+            cam0_occlusion_mask=tmp_path / "missing_occ.png",
+            overwrite=True,
+            write_overlays=False,
+            projection_audit=False,
+        )
