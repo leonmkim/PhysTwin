@@ -127,6 +127,40 @@ def _validate_camera_serials(serials: list[str]) -> list[str]:
     return cleaned
 
 
+def _resolve_case_dir(out_root: Path, case_name: str) -> Path:
+    if not case_name:
+        raise ValueError("case_name must be non-empty")
+
+    case_path = Path(case_name)
+
+    if case_path.is_absolute():
+        raise ValueError(
+            f"case_name must be a simple directory name, got absolute path: {case_name!r}"
+        )
+
+    if case_name in {".", ".."}:
+        raise ValueError(f"case_name must be a simple directory name, got: {case_name!r}")
+
+    if len(case_path.parts) != 1 or case_path.name != case_name:
+        raise ValueError(f"case_name must be a single path component, got: {case_name!r}")
+
+    if "/" in case_name or "\\" in case_name:
+        raise ValueError(
+            f"case_name must not contain path separators, got: {case_name!r}"
+        )
+
+    out_root_resolved = out_root.resolve(strict=False)
+    case_dir = (out_root_resolved / case_name).resolve(strict=False)
+
+    if case_dir.parent != out_root_resolved:
+        raise ValueError(
+            "case_dir must be a direct child of out_root: "
+            f"out_root={out_root_resolved}, case_dir={case_dir}"
+        )
+
+    return case_dir
+
+
 def _prepare_case_dir(case_dir: Path, overwrite: bool) -> None:
     if case_dir.exists():
         if not overwrite:
@@ -199,12 +233,12 @@ def materialize_converted_gaussian_data(
     overwrite: bool = False,
 ) -> Path:
     serials = _validate_camera_serials(camera_serials)
+    case_dir = _resolve_case_dir(out_root, case_name)
     if not shape_prior_glb.is_file() or shape_prior_glb.stat().st_size <= 0:
         raise FileNotFoundError(
             f"shape prior GLB must exist and be nonzero: {shape_prior_glb}"
         )
 
-    case_dir = out_root / case_name
     _prepare_case_dir(case_dir, overwrite)
 
     backend = create_io_backend(
