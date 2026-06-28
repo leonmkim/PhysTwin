@@ -10,6 +10,11 @@ import pickle
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 
+try:
+    from data_process.o3d_utils import build_radius_index, query_radius_neighbors, vec3d
+except ImportError:  # pragma: no cover - direct script invocation
+    from o3d_utils import build_radius_index, query_radius_neighbors, vec3d
+
 parser = ArgumentParser()
 parser.add_argument(
     "--base_path",
@@ -154,92 +159,21 @@ def filter_motion(track_data, neighbor_dist=0.01):
     num_frames = object_points.shape[0]
     num_points = object_points.shape[1]
 
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
     for i in tqdm(range(num_frames - 1)):
-        # Convert the points of the current frame to an Open3D point cloud
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(object_points[i])
-        pcd.colors = o3d.utility.Vector3dVector(object_colors[i])
-        # Build the KDTree
-        kdtree = o3d.geometry.KDTreeFlann(pcd)
-        # modified_points = []
-        # new_points = []
-        # Get the neighbors for each points and filter motion based on the motion difference between neighbours and the point
+        frame_tree = build_radius_index(object_points[i])
         for j in range(num_points):
             if object_motions_valid[i, j] == 0:
                 continue
-            # Get the neighbors within neighbor_dist
-            [k, idx, _] = kdtree.search_radius_vector_3d(
-                object_points[i, j], neighbor_dist
-            )
+            idx = query_radius_neighbors(frame_tree, object_points[i, j], neighbor_dist)
             neighbors = [index for index in idx if object_motions_valid[i, index] == 1]
             if len(neighbors) < 5:
                 object_motions_valid[i, j] = 0
-                # modified_points.append(object_points[i, j])
-                # new_points.append(object_points[i + 1, j])
             motion_diff = np.linalg.norm(
                 object_motions[i, j] - object_motions[i, neighbors], axis=1
             )
             if (motion_diff < neighbor_dist / 2).sum() < 0.5 * len(neighbors):
                 object_motions_valid[i, j] = 0
-                # modified_points.append(object_points[i, j])
-                # new_points.append(object_points[i + 1, j])
 
-        motion_pcd = o3d.geometry.PointCloud()
-        motion_pcd.points = o3d.utility.Vector3dVector(
-            object_points[i][np.where(object_motions_valid[i])]
-        )
-        motion_pcd.colors = o3d.utility.Vector3dVector(
-            object_colors[i][np.where(object_motions_valid[i])]
-        )
-        motion_pcd.colors = o3d.utility.Vector3dVector(
-            rainbow_colors[np.where(object_motions_valid[i])]
-        )
-
-        # modified_pcd = o3d.geometry.PointCloud()
-        # modified_pcd.points = o3d.utility.Vector3dVector(modified_points)
-        # modified_pcd.colors = o3d.utility.Vector3dVector(
-        #     np.array([1, 0, 0]) * np.ones((len(modified_points), 3))
-        # )
-
-        # new_pcd = o3d.geometry.PointCloud()
-        # new_pcd.points = o3d.utility.Vector3dVector(new_points)
-        # new_pcd.colors = o3d.utility.Vector3dVector(
-        #     np.array([0, 1, 0]) * np.ones((len(new_points), 3))
-        # )
-        if i == 0:
-            render_motion_pcd = motion_pcd
-            # render_modified_pcd = modified_pcd
-            # render_new_pcd = new_pcd
-            vis.add_geometry(render_motion_pcd)
-            # vis.add_geometry(render_modified_pcd)
-            # vis.add_geometry(render_new_pcd)
-            # Adjust the viewpoint
-            view_control = vis.get_view_control()
-            view_control.set_front([1, 0, -2])
-            view_control.set_up([0, 0, -1])
-            view_control.set_zoom(1)
-        else:
-            render_motion_pcd.points = o3d.utility.Vector3dVector(motion_pcd.points)
-            render_motion_pcd.colors = o3d.utility.Vector3dVector(motion_pcd.colors)
-            # render_modified_pcd.points = o3d.utility.Vector3dVector(modified_points)
-            # render_modified_pcd.colors = o3d.utility.Vector3dVector(
-            #     np.array([1, 0, 0]) * np.ones((len(modified_points), 3))
-            # )
-            # render_new_pcd.points = o3d.utility.Vector3dVector(new_points)
-            # render_new_pcd.colors = o3d.utility.Vector3dVector(
-            #     np.array([0, 1, 0]) * np.ones((len(new_points), 3))
-            # )
-            vis.update_geometry(render_motion_pcd)
-            # vis.update_geometry(render_modified_pcd)
-            # vis.update_geometry(render_new_pcd)
-            vis.poll_events()
-            vis.update_renderer()
-        # modified_num = len(modified_points)
-        # print(f"Object Frame {i}: {modified_num} points are modified")
-
-    vis.destroy_window()
     track_data["object_motions_valid"] = object_motions_valid
 
     controller_points = track_data["controller_points"]
@@ -261,25 +195,15 @@ def filter_motion(track_data, neighbor_dist=0.01):
     y_normalized = (controller_points[0, :, 1] - y_min) / (y_max - y_min)
     rainbow_colors = plt.cm.rainbow(y_normalized)[:, :3]
 
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-
     for i in tqdm(range(num_frames - 1)):
-        # Convert the points of the current frame to an Open3D point cloud
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(controller_points[i])
-        pcd.colors = o3d.utility.Vector3dVector(controller_colors[i])
-        # Build the KDTree
-        kdtree = o3d.geometry.KDTreeFlann(pcd)
-        # Get the neighbors for each points and filter motion based on the motion difference between neighbours and the point
+        frame_tree = build_radius_index(controller_points[i])
         for j in range(num_points):
             if mask[j] == 0:
                 controller_motions_valid[i, j] = 0
             if controller_motions_valid[i, j] == 0:
                 continue
-            # Get the neighbors within neighbor_dist
-            [k, idx, _] = kdtree.search_radius_vector_3d(
-                controller_points[i, j], neighbor_dist
+            idx = query_radius_neighbors(
+                frame_tree, controller_points[i, j], neighbor_dist
             )
             neighbors = [
                 index for index in idx if controller_motions_valid[i, index] == 1
@@ -294,29 +218,6 @@ def filter_motion(track_data, neighbor_dist=0.01):
             if (motion_diff < neighbor_dist / 2).sum() < 0.5 * len(neighbors):
                 controller_motions_valid[i, j] = 0
                 mask[j] = 0
-
-        motion_pcd = o3d.geometry.PointCloud()
-        motion_pcd.points = o3d.utility.Vector3dVector(
-            controller_points[i][np.where(mask)]
-        )
-        motion_pcd.colors = o3d.utility.Vector3dVector(
-            controller_colors[i][np.where(controller_motions_valid[i])]
-        )
-
-        if i == 0:
-            render_motion_pcd = motion_pcd
-            vis.add_geometry(render_motion_pcd)
-            # Adjust the viewpoint
-            view_control = vis.get_view_control()
-            view_control.set_front([1, 0, -2])
-            view_control.set_up([0, 0, -1])
-            view_control.set_zoom(1)
-        else:
-            render_motion_pcd.points = o3d.utility.Vector3dVector(motion_pcd.points)
-            render_motion_pcd.colors = o3d.utility.Vector3dVector(motion_pcd.colors)
-            vis.update_geometry(render_motion_pcd)
-            vis.poll_events()
-            vis.update_renderer()
 
     track_data["controller_mask"] = mask
     return track_data
@@ -341,7 +242,7 @@ def get_final_track_data(track_data, controller_threhsold=0.01):
         sample_points.append(new_controller_points[0, i])
     sample_points = np.array(sample_points)
     sample_pcd = o3d.geometry.PointCloud()
-    sample_pcd.points = o3d.utility.Vector3dVector(sample_points)
+    sample_pcd.points = vec3d(sample_points)
     fps_pcd = sample_pcd.farthest_point_down_sample(30)
     final_indices = []
     for point in fps_pcd.points:
@@ -353,8 +254,8 @@ def get_final_track_data(track_data, controller_threhsold=0.01):
     nearest_controller_points = new_controller_points[:, final_indices]
 
     # object_pcd = o3d.geometry.PointCloud()
-    # object_pcd.points = o3d.utility.Vector3dVector(valid_object_points)
-    # object_pcd.colors = o3d.utility.Vector3dVector(
+    # object_pcd.points = vec3d(valid_object_points)
+    # object_pcd.colors = vec3d(
     #     object_colors[0][np.where(object_motions_valid[0])]
     # )
     # controller_meshes = []
@@ -395,13 +296,13 @@ def visualize_track(track_data):
 
     for i in range(frame_num):
         object_pcd = o3d.geometry.PointCloud()
-        object_pcd.points = o3d.utility.Vector3dVector(
+        object_pcd.points = vec3d(
             object_points[i, np.where(object_motions_valid[i])[0], :]
         )
-        # object_pcd.colors = o3d.utility.Vector3dVector(
+        # object_pcd.colors = vec3d(
         #     object_colors[i, np.where(object_motions_valid[i])[0], :]
         # )
-        object_pcd.colors = o3d.utility.Vector3dVector(
+        object_pcd.colors = vec3d(
             rainbow_colors[np.where(object_motions_valid[i])[0]]
         )
 
@@ -423,8 +324,8 @@ def visualize_track(track_data):
             view_control.set_up([0, 0, -1])
             view_control.set_zoom(1)
         else:
-            render_object_pcd.points = o3d.utility.Vector3dVector(object_pcd.points)
-            render_object_pcd.colors = o3d.utility.Vector3dVector(object_pcd.colors)
+            render_object_pcd.points = vec3d(object_pcd.points)
+            render_object_pcd.colors = vec3d(object_pcd.colors)
             vis.update_geometry(render_object_pcd)
             for j in range(controller_points.shape[1]):
                 origin = controller_points[i, j]
@@ -458,5 +359,3 @@ if __name__ == "__main__":
 
     with open(f"{base_path}/{case_name}/track_process_data.pkl", "wb") as f:
         pickle.dump(track_data, f)
-
-    visualize_track(track_data)

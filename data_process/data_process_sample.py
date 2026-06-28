@@ -10,6 +10,11 @@ import cv2
 from utils.align_util import as_mesh
 from argparse import ArgumentParser
 
+try:
+    from data_process.o3d_utils import vec3d
+except ImportError:  # pragma: no cover - direct script invocation
+    from o3d_utils import vec3d
+
 parser = ArgumentParser()
 parser.add_argument(
     "--base_path",
@@ -20,6 +25,12 @@ parser.add_argument("--case_name", type=str, required=True)
 parser.add_argument("--shape_prior", action="store_true", default=False)
 parser.add_argument("--num_surface_points", type=int, default=1024)
 parser.add_argument("--volume_sample_size", type=float, default=0.005)
+parser.add_argument(
+    "--vis",
+    action="store_true",
+    default=False,
+    help="Render optional preview videos (off by default for headless runs).",
+)
 args = parser.parse_args()
 
 base_path = args.base_path
@@ -112,31 +123,32 @@ def process_unique_points(track_data):
         all_points = object_points[0][index]
 
     # Render the final pcd with interior filling as a turntable video
-    all_pcd = o3d.geometry.PointCloud()
-    all_pcd.points = o3d.utility.Vector3dVector(all_points)
-    coorindate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+    if args.vis:
+        all_pcd = o3d.geometry.PointCloud()
+        all_pcd.points = vec3d(all_points)
+        coorindate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
 
-    vis = o3d.visualization.Visualizer()
-    vis.create_window(visible=False)
-    dummy_frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
-    height, width, _ = dummy_frame.shape
-    fourcc = cv2.VideoWriter_fourcc(*"avc1")
-    video_writer = cv2.VideoWriter(
-        f"{base_path}/{case_name}/final_pcd.mp4", fourcc, 30, (width, height)
-    )
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(visible=False)
+        dummy_frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
+        height, width, _ = dummy_frame.shape
+        fourcc = cv2.VideoWriter_fourcc(*"avc1")
+        video_writer = cv2.VideoWriter(
+            f"{base_path}/{case_name}/final_pcd.mp4", fourcc, 30, (width, height)
+        )
 
-    vis.add_geometry(all_pcd)
-    # vis.add_geometry(coorindate)
-    view_control = vis.get_view_control()
-    for j in range(360):
-        view_control.rotate(10, 0)
-        vis.poll_events()
-        vis.update_renderer()
-        frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
-        frame = (frame * 255).astype(np.uint8)
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        video_writer.write(frame)
-    vis.destroy_window()
+        vis.add_geometry(all_pcd)
+        # vis.add_geometry(coorindate)
+        view_control = vis.get_view_control()
+        for j in range(360):
+            view_control.rotate(10, 0)
+            vis.poll_events()
+            vis.update_renderer()
+            frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
+            frame = (frame * 255).astype(np.uint8)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            video_writer.write(frame)
+        vis.destroy_window()
 
     track_data.pop("object_points")
     track_data.pop("object_colors")
@@ -183,13 +195,13 @@ def visualize_track(track_data):
 
     for i in range(frame_num):
         object_pcd = o3d.geometry.PointCloud()
-        object_pcd.points = o3d.utility.Vector3dVector(
+        object_pcd.points = vec3d(
             object_points[i, np.where(object_visibilities[i])[0], :]
         )
-        # object_pcd.colors = o3d.utility.Vector3dVector(
+        # object_pcd.colors = vec3d(
         #     object_colors[i, np.where(object_motions_valid[i])[0], :]
         # )
-        object_pcd.colors = o3d.utility.Vector3dVector(
+        object_pcd.colors = vec3d(
             rainbow_colors[np.where(object_visibilities[i])[0]]
         )
 
@@ -211,8 +223,8 @@ def visualize_track(track_data):
             view_control.set_up([0, 0, -1])
             view_control.set_zoom(1)
         else:
-            render_object_pcd.points = o3d.utility.Vector3dVector(object_pcd.points)
-            render_object_pcd.colors = o3d.utility.Vector3dVector(object_pcd.colors)
+            render_object_pcd.points = vec3d(object_pcd.points)
+            render_object_pcd.colors = vec3d(object_pcd.colors)
             vis.update_geometry(render_object_pcd)
             for j in range(controller_points.shape[1]):
                 origin = controller_points[i, j]
@@ -238,4 +250,5 @@ if __name__ == "__main__":
     with open(f"{base_path}/{case_name}/final_data.pkl", "wb") as f:
         pickle.dump(track_data, f)
 
-    visualize_track(track_data)
+    if args.vis:
+        visualize_track(track_data)

@@ -21,7 +21,12 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from scipy.spatial import KDTree
 
-VIS = True
+try:
+    from data_process.o3d_utils import transform_mesh_vertices, vec3d, vec3i
+except ImportError:  # pragma: no cover - direct script invocation
+    from o3d_utils import transform_mesh_vertices, vec3d, vec3i
+
+VIS = False
 parser = ArgumentParser()
 parser.add_argument(
     "--base_path",
@@ -45,9 +50,16 @@ parser.add_argument(
     default=16,
     help="Pose-selection render chunk size for render_multi_images (default: 16).",
 )
+parser.add_argument(
+    "--vis",
+    action="store_true",
+    default=False,
+    help="Render optional alignment turntable video (off by default for headless runs).",
+)
 args = parser.parse_args()
 if args.render_batch_size < 1:
     parser.error("--render-batch-size must be >= 1")
+VIS = bool(args.vis)
 
 base_path = args.base_path
 case_name = args.case_name
@@ -204,7 +216,7 @@ def deform_ARAP(initial_mesh_world, mesh_matching_points_world, matching_points)
     mesh_points_indices = np.asarray(mesh_points_indices, dtype=np.int32)
     deform_mesh = initial_mesh_world.deform_as_rigid_as_possible(
         o3d.utility.IntVector(mesh_points_indices),
-        o3d.utility.Vector3dVector(matching_points),
+        vec3d(matching_points),
         max_iter=1,
     )
     return deform_mesh, mesh_points_indices
@@ -318,7 +330,7 @@ def deform_ARAP_ray_registration(
 
     final_mesh_world = deform_kp_mesh_world.deform_as_rigid_as_possible(
         o3d.utility.IntVector(final_indices),
-        o3d.utility.Vector3dVector(final_targets),
+        vec3d(final_targets),
         max_iter=1,
     )
     return final_mesh_world
@@ -577,15 +589,15 @@ if __name__ == "__main__":
     # Do the ARAP based on the matching keypoints
     # Convert the mesh to open3d to use the ARAP function
     initial_mesh_world = o3d.geometry.TriangleMesh()
-    initial_mesh_world.vertices = o3d.utility.Vector3dVector(np.asarray(mesh.vertices))
-    initial_mesh_world.triangles = o3d.utility.Vector3iVector(np.asarray(mesh.faces))
+    initial_mesh_world.vertices = vec3d(np.asarray(mesh.vertices))
+    initial_mesh_world.triangles = vec3i(np.asarray(mesh.faces))
     # Need to remove the duplicated vertices to enable open3d, however, the duplicated points are important in trimesh for texture
     initial_mesh_world = initial_mesh_world.remove_duplicated_vertices()
     # Get the index from original vertices to the mesh vertices, mapping between trimesh and open3d
-    kdtree = KDTree(initial_mesh_world.vertices)
+    kdtree = KDTree(np.asarray(initial_mesh_world.vertices, dtype=np.float64))
     _, trimesh_indices = kdtree.query(np.asarray(mesh.vertices))
     trimesh_indices = np.asarray(trimesh_indices, dtype=np.int32)
-    initial_mesh_world.transform(mesh2world)
+    initial_mesh_world = transform_mesh_vertices(initial_mesh_world, mesh2world)
 
     # ARAP based on the keypoints
     deform_kp_mesh_world, mesh_points_indices = deform_ARAP(
@@ -610,8 +622,8 @@ if __name__ == "__main__":
 
         # Visualize the partial observation and the mesh
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(obs_points)
-        pcd.colors = o3d.utility.Vector3dVector(obs_colors)
+        pcd.points = vec3d(obs_points)
+        pcd.colors = vec3d(obs_colors)
 
         coordinate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
 

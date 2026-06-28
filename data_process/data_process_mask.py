@@ -10,6 +10,11 @@ import cv2
 import pickle
 from argparse import ArgumentParser
 
+try:
+    from data_process.o3d_utils import vec3d as _vec3d
+except ImportError:  # pragma: no cover - direct script invocation
+    from o3d_utils import vec3d as _vec3d
+
 parser = ArgumentParser()
 parser.add_argument(
     "--base_path",
@@ -60,8 +65,8 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
         object_points = points[i][object_mask]
         object_colors = colors[i][object_mask]
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(object_points)
-        pcd.colors = o3d.utility.Vector3dVector(object_colors)
+        pcd.points = _vec3d(object_points)
+        pcd.colors = _vec3d(object_colors)
         object_pcd += pcd
 
         # Load the controller mask
@@ -74,8 +79,8 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
         controller_colors = colors[i][controller_mask]
 
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(controller_points)
-        pcd.colors = o3d.utility.Vector3dVector(controller_colors)
+        pcd.points = _vec3d(controller_points)
+        pcd.colors = _vec3d(controller_colors)
         controller_pcd += pcd
 
     # Apply the outlier removal
@@ -136,14 +141,14 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
         processed_masks[frame_idx][i]["controller"] = controller_mask
 
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points[i][object_mask])
-        pcd.colors = o3d.utility.Vector3dVector(colors[i][object_mask])
+        pcd.points = _vec3d(points[i][object_mask])
+        pcd.colors = _vec3d(colors[i][object_mask])
 
         object_pcd += pcd
 
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points[i][controller_mask])
-        pcd.colors = o3d.utility.Vector3dVector(colors[i][controller_mask])
+        pcd.points = _vec3d(points[i][controller_mask])
+        pcd.colors = _vec3d(colors[i][controller_mask])
 
         controller_pcd += pcd
 
@@ -177,38 +182,8 @@ if __name__ == "__main__":
                 else:
                     mask_info[i]["controller"] = [int(key)]
 
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-
-    object_pcd = None
-    controller_pcd = None
     for i in tqdm(range(frame_num)):
-        temp_object_pcd, temp_controller_pcd = process_pcd_mask(
-            i, pcd_path, mask_path, mask_info, num_cam
-        )
-        if i == 0:
-            object_pcd = temp_object_pcd
-            controller_pcd = temp_controller_pcd
-            vis.add_geometry(object_pcd)
-            vis.add_geometry(controller_pcd)
-            # Adjust the viewpoint
-            view_control = vis.get_view_control()
-            view_control.set_front([1, 0, -2])
-            view_control.set_up([0, 0, -1])
-            view_control.set_zoom(1)
-        else:
-            object_pcd.points = o3d.utility.Vector3dVector(temp_object_pcd.points)
-            object_pcd.colors = o3d.utility.Vector3dVector(temp_object_pcd.colors)
-            controller_pcd.points = o3d.utility.Vector3dVector(
-                temp_controller_pcd.points
-            )
-            controller_pcd.colors = o3d.utility.Vector3dVector(
-                temp_controller_pcd.colors
-            )
-            vis.update_geometry(object_pcd)
-            vis.update_geometry(controller_pcd)
-            vis.poll_events()
-            vis.update_renderer()
+        process_pcd_mask(i, pcd_path, mask_path, mask_info, num_cam)
 
     # Save the processed masks considering both depth filter, semantic filter and outlier filter
     with open(f"{base_path}/{case_name}/mask/processed_masks.pkl", "wb") as f:

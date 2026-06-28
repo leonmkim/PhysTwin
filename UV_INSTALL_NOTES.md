@@ -75,6 +75,31 @@ timeout 180s xvfb-run -a \
   2>&1 | tee temp_experiments/logs/interactive_playground_double_stretch_sloth.log
 ```
 
+### Converted-session validation host notes (2026-06)
+
+Open3D **0.17** on headless/Xvfb hosts is fragile for several PhysTwin `data_process/`
+paths. Validated workarounds live in `data_process/o3d_utils.py`:
+
+- `vec3d()` / `vec3i()` — contiguous **float64** / **int32** vectors before
+  `Vector3dVector` / `Vector3iVector` (float32 inputs can SIGSEGV with no Python
+  exception).
+- `build_radius_index()` / `query_radius_neighbors()` — scipy `cKDTree` instead of
+  Open3D `KDTreeFlann.search_radius_vector_3d` (also SIGSEGV headless).
+- `transform_mesh_vertices()` — numpy SE(3) apply instead of `TriangleMesh.transform`.
+- Optional Open3D visualizer loops in mask/track/sample/align are disabled unless
+  `--vis` is passed.
+
+TRELLIS shape-prior imports may require **`utils3d`** when the external TRELLIS tree
+does not vendor it. On the validation host this was installed into the canonical
+PhysTwin `.venv` with:
+
+```bash
+cd third_party/phystwin
+uv pip install utils3d
+```
+
+Re-run only after confirming import failures (`ModuleNotFoundError: utils3d`).
+
 ## Playground smoke test (validated 2026-06-09)
 
 | Item | Result |
