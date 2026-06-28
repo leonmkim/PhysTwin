@@ -1,6 +1,11 @@
 from qqtt.data import RealData, SimpleData
 from qqtt.utils import logger, visualize_pc, cfg
 from qqtt.model.diff_simulator import SpringMassSystemWarp
+
+try:
+    from data_process.o3d_utils import build_radius_index, search_hybrid_neighbors
+except ImportError:  # pragma: no cover - author layout
+    from o3d_utils import build_radius_index, search_hybrid_neighbors
 import open3d as o3d
 import numpy as np
 import torch
@@ -85,18 +90,16 @@ class OptimizerCMA:
         if controller_points is not None:
             controller_points = controller_points.cpu().numpy()
         if mask is None:
-            object_pcd = o3d.geometry.PointCloud()
-            object_pcd.points = o3d.utility.Vector3dVector(object_points)
-            pcd_tree = o3d.geometry.KDTreeFlann(object_pcd)
+            points = np.ascontiguousarray(object_points, dtype=np.float64)
+            pcd_tree = build_radius_index(points)
 
             # Connect the springs of the objects first
-            points = np.asarray(object_pcd.points)
             spring_flags = np.zeros((len(points), len(points)))
             springs = []
             rest_lengths = []
             for i in range(len(points)):
-                [k, idx, _] = pcd_tree.search_hybrid_vector_3d(
-                    points[i], object_radius, object_max_neighbours
+                _k, idx, _ = search_hybrid_neighbors(
+                    pcd_tree, points[i], object_radius, object_max_neighbours
                 )
                 idx = idx[1:]
                 for j in idx:
@@ -114,11 +117,13 @@ class OptimizerCMA:
             num_object_springs = len(springs)
 
             if controller_points is not None:
+                controller_points = np.ascontiguousarray(controller_points, dtype=np.float64)
                 # Connect the springs between the controller points and the object points
                 num_object_points = len(points)
                 points = np.concatenate([points, controller_points], axis=0)
                 for i in range(len(controller_points)):
-                    [k, idx, _] = pcd_tree.search_hybrid_vector_3d(
+                    _k, idx, _ = search_hybrid_neighbors(
+                        pcd_tree,
                         controller_points[i],
                         controller_radius,
                         controller_max_neighbours,
@@ -149,16 +154,14 @@ class OptimizerCMA:
             index = 0
             # Loop different objects to connect the springs separately
             for value in unique_values:
-                temp_points = object_points[mask == value]
-                temp_pcd = o3d.geometry.PointCloud()
-                temp_pcd.points = o3d.utility.Vector3dVector(temp_points)
-                temp_tree = o3d.geometry.KDTreeFlann(temp_pcd)
+                temp_points = np.ascontiguousarray(object_points[mask == value], dtype=np.float64)
+                temp_tree = build_radius_index(temp_points)
                 temp_spring_flags = np.zeros((len(temp_points), len(temp_points)))
                 temp_springs = []
                 temp_rest_lengths = []
                 for i in range(len(temp_points)):
-                    [k, idx, _] = temp_tree.search_hybrid_vector_3d(
-                        temp_points[i], object_radius, object_max_neighbours
+                    _k, idx, _ = search_hybrid_neighbors(
+                        temp_tree, temp_points[i], object_radius, object_max_neighbours
                     )
                     idx = idx[1:]
                     for j in idx:

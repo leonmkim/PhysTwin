@@ -83,8 +83,15 @@ paths. Validated workarounds live in `data_process/o3d_utils.py`:
 - `vec3d()` / `vec3i()` — contiguous **float64** / **int32** vectors before
   `Vector3dVector` / `Vector3iVector` (float32 inputs can SIGSEGV with no Python
   exception).
-- `build_radius_index()` / `query_radius_neighbors()` — scipy `cKDTree` instead of
-  Open3D `KDTreeFlann.search_radius_vector_3d` (also SIGSEGV headless).
+- `build_radius_index()` / `query_radius_neighbors()` / `search_hybrid_neighbors()` —
+  scipy `cKDTree` instead of Open3D `KDTreeFlann.search_hybrid_vector_3d` /
+  `search_radius_vector_3d` (also SIGSEGV headless).
+- `qqtt/engine/trainer_warp.py` and `qqtt/engine/cma_optimize_warp.py` use the same
+  scipy hybrid search for spring-graph initialization (required for headless
+  `inference_warp.py` / `train_warp.py`).
+- `InvPhyTrainerWarp.visualize_sim()` skips Open3D `visualize_pc()` when
+  `pure_inference_mode=True` after writing `inference.pkl` (inference video encoding
+  also SIGSEGV headless).
 - `transform_mesh_vertices()` — numpy SE(3) apply instead of `TriangleMesh.transform`.
 - Optional Open3D visualizer loops in mask/track/sample/align are disabled unless
   `--vis` is passed.

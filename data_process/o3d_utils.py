@@ -36,6 +36,27 @@ def query_radius_neighbors(tree, query: np.ndarray, radius: float) -> list[int]:
     return list(tree.query_ball_point(query_pt, radius))
 
 
+def search_hybrid_neighbors(
+    tree,
+    query: np.ndarray,
+    radius: float,
+    max_nn: int,
+) -> tuple[int, list[int], list[float]]:
+    """Headless-safe replacement for Open3D ``KDTreeFlann.search_hybrid_vector_3d``."""
+    query_pt = np.ascontiguousarray(query, dtype=np.float64)
+    indices = list(tree.query_ball_point(query_pt, radius))
+    if not indices:
+        return 0, [], []
+    data = np.ascontiguousarray(tree.data, dtype=np.float64)
+    idx_arr = np.asarray(indices, dtype=int)
+    dists = np.linalg.norm(data[idx_arr] - query_pt, axis=1)
+    order = np.argsort(dists)
+    cap = min(max_nn, len(order))
+    selected = [indices[order[i]] for i in range(cap)]
+    dist_sq = (dists[order[:cap]] ** 2).tolist()
+    return cap, selected, dist_sq
+
+
 def vec3i(arr) -> o3d.utility.Vector3iVector:  # type: ignore[name-defined]
     """Return Vector3iVector from contiguous int32 (M, 3) input."""
     values = np.asarray(arr)
