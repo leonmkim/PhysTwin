@@ -27,7 +27,7 @@ from data_process.io_backend import (
 )
 
 SCRIPT_VERSION = "1.0.0"
-QQTT_CAMERA_COUNT = 3
+MIN_QQTT_CAMERA_COUNT = 2
 
 
 def _best_effort_git_head(repo_root: Path) -> str | None:
@@ -114,15 +114,10 @@ def _parse_args() -> argparse.Namespace:
 
 def _validate_camera_serials(serials: list[str]) -> list[str]:
     cleaned = [str(s).strip() for s in serials if str(s).strip()]
-    if len(cleaned) < 2:
+    if len(cleaned) < MIN_QQTT_CAMERA_COUNT:
         raise ValueError(
-            f"At least 2 camera serials are required; got {len(cleaned)}"
-        )
-    if len(cleaned) != QQTT_CAMERA_COUNT:
-        raise ValueError(
-            f"QQTT Gaussian materialization requires exactly {QQTT_CAMERA_COUNT} "
-            f"cameras; got {len(cleaned)} serial(s). "
-            "generate_interp_poses.py and the current training path expect three views."
+            f"At least {MIN_QQTT_CAMERA_COUNT} camera serials are required; "
+            f"got {len(cleaned)}"
         )
     return cleaned
 
@@ -255,9 +250,9 @@ def materialize_converted_gaussian_data(
         raise RuntimeError(
             f"Unexpected backend camera ids {cam_ids}; expected 0..{len(serials) - 1}"
         )
-    if len(cam_ids) != QQTT_CAMERA_COUNT:
+    if len(cam_ids) != len(serials):
         raise RuntimeError(
-            f"Backend exposed {len(cam_ids)} cameras; expected {QQTT_CAMERA_COUNT}"
+            f"Backend exposed {len(cam_ids)} cameras; expected {len(serials)}"
         )
     if frame_index < 0 or frame_index >= backend.frame_count():
         raise IndexError(
