@@ -24,7 +24,7 @@ import trimesh
 
 from data_process.io_backend import WORLD_TRANSFORM_PHYS_TWIN_Z_UP
 from data_process.materialize_converted_gaussian_data import (
-    QQTT_CAMERA_COUNT,
+    MIN_QQTT_CAMERA_COUNT,
     materialize_converted_gaussian_data,
 )
 
@@ -418,6 +418,13 @@ def materialize_converted_masked_gaussian_data(
     if occlusion_fallback_prompts is None:
         occlusion_fallback_prompts = ["hand", "arm", "hand.arm"]
 
+    camera_count = len([s for s in camera_serials if str(s).strip()])
+    if camera_count < MIN_QQTT_CAMERA_COUNT:
+        raise ValueError(
+            f"Masked Gaussian materialization requires at least "
+            f"{MIN_QQTT_CAMERA_COUNT} cameras; got {camera_count}"
+        )
+
     repo_root = Path(__file__).resolve().parents[1]
     py = python_executable or Path(sys.executable)
     seg_script = segment_script or (repo_root / "data_process" / "segment_util_image.py")
@@ -461,7 +468,7 @@ def materialize_converted_masked_gaussian_data(
         },
     }
 
-    for cam_id in range(1, QQTT_CAMERA_COUNT):
+    for cam_id in range(1, camera_count):
         img_path = case_dir / f"{cam_id}.png"
         obj_path = case_dir / f"mask_{cam_id}.png"
         occ_path = case_dir / f"mask_human_{cam_id}.png"
@@ -526,7 +533,7 @@ def materialize_converted_masked_gaussian_data(
 
     if write_overlays:
         overlay_dir = case_dir / "mask_overlays"
-        for cam_id in range(QQTT_CAMERA_COUNT):
+        for cam_id in range(camera_count):
             rgb_path = case_dir / f"{cam_id}.png"
             obj_alpha = load_mask_alpha(case_dir / f"mask_{cam_id}.png")
             occ_alpha = load_mask_alpha(case_dir / f"mask_human_{cam_id}.png")
@@ -551,7 +558,7 @@ def materialize_converted_masked_gaussian_data(
             shape_prior_path=case_dir / "shape_prior.glb",
             segmented_mask_paths={
                 cam_id: case_dir / f"mask_{cam_id}.png"
-                for cam_id in range(QQTT_CAMERA_COUNT)
+                for cam_id in range(camera_count)
             },
         )
         audit_path = case_dir / "projection_audit_summary.json"

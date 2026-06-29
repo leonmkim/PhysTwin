@@ -70,6 +70,38 @@ def generate_interpolated_path(poses: np.ndarray,
     return points_to_poses(new_points)
 
 
+def generate_closed_loop_interp_poses(
+    c2ws: list[np.ndarray] | np.ndarray,
+    *,
+    n_interp: int = 50,
+) -> list[np.ndarray]:
+    """Interpolate a closed camera path over all input poses.
+
+    Generates segments 0->1, 1->2, ..., (N-1)->0 and concatenates them.
+    """
+    poses = np.asarray(c2ws, dtype=np.float64)
+    if poses.ndim != 3 or poses.shape[1:] != (4, 4):
+        raise ValueError(
+            f"Expected c2ws with shape (N, 4, 4); got {poses.shape}"
+        )
+    camera_count = int(poses.shape[0])
+    if camera_count < 2:
+        raise ValueError(
+            f"At least 2 camera poses are required; got {camera_count}"
+        )
+
+    segments: list[np.ndarray] = []
+    for start_idx in range(camera_count):
+        end_idx = (start_idx + 1) % camera_count
+        pair = np.stack([poses[start_idx], poses[end_idx]], axis=0)[:, :3, :]
+        segments.append(generate_interpolated_path(pair, n_interp))
+    interp_poses = np.concatenate(segments, axis=0)
+    return [
+        np.vstack([pose, np.array([0.0, 0.0, 0.0, 1.0])])
+        for pose in interp_poses
+    ]
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -97,18 +129,7 @@ if __name__ == '__main__':
         with open(camera_path, 'rb') as f:
             camera_meta = pickle.load(f)
         c2ws = camera_meta['c2ws']
-        pose_0 = c2ws[0]
-        pose_1 = c2ws[1]
-        pose_2 = c2ws[2]
-        n_interp = 50
-        poses_01 = np.stack([pose_0, pose_1], 0)[:, :3, :]
-        interp_poses_01 = generate_interpolated_path(poses_01, n_interp)
-        poses_12 = np.stack([pose_1, pose_2], 0)[:, :3, :]
-        interp_poses_12 = generate_interpolated_path(poses_12, n_interp)
-        poses_20 = np.stack([pose_2, pose_0], 0)[:, :3, :]
-        interp_poses_20 = generate_interpolated_path(poses_20, n_interp)
-        interp_poses = np.concatenate([interp_poses_01, interp_poses_12, interp_poses_20], 0)
-        output_poses = [np.vstack([pose, np.array([0, 0, 0, 1])]) for pose in interp_poses]
+        output_poses = generate_closed_loop_interp_poses(c2ws, n_interp=50)
         if args.interp_poses_output_dir:
             out_scene_dir = os.path.join(args.interp_poses_output_dir, scene_name)
             os.makedirs(out_scene_dir, exist_ok=True)
