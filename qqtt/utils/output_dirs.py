@@ -132,3 +132,23 @@ def optimal_params_path(args: Namespace, case_name: str) -> str:
 def inference_pkl_path(args: Namespace, case_name: str, *, reference: bool = True) -> str:
     root = reference_experiments_root(args) if reference else args.experiments_dir
     return os.path.join(root, case_name, "inference.pkl")
+
+
+def parse_view_indices_csv(raw: str | None) -> list[int] | None:
+    if not raw:
+        return None
+    parts = [part.strip() for part in str(raw).split(",") if part.strip()]
+    if not parts:
+        return None
+    indices: list[int] = []
+    for part in parts:
+        try:
+            value = int(part)
+        except ValueError as exc:
+            raise ValueError(f"invalid view index {part!r} in --view-indices") from exc
+        if value < 0:
+            raise ValueError(f"view index must be non-negative (got {value})")
+        indices.append(value)
+    if len(set(indices)) != len(indices):
+        raise ValueError(f"duplicate view indices in --view-indices: {raw!r}")
+    return indices
