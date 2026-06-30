@@ -49,6 +49,7 @@ import pickle
 from qqtt.utils.output_dirs import (
     add_experiments_dir_arg,
     add_reference_experiments_dir_arg,
+    parse_view_indices_csv,
     reference_experiments_root,
 )
 
@@ -63,13 +64,14 @@ def render_set(
     train_test_exp,
     separate_sh,
     disable_sh=False,
+    view_indices=None,
 ):
 
     render_path = os.path.join(output_path, name)
     makedirs(render_path, exist_ok=True)
 
-    # view_indices = [0, 25, 50, 75, 100, 125]
-    view_indices = [0, 50, 100]
+    if view_indices is None:
+        view_indices = [0, 50, 100]
     selected_views = [views[i] for i in view_indices]
 
     for idx, view in enumerate(tqdm(selected_views, desc="Rendering progress")):
@@ -121,6 +123,7 @@ def render_sets(
     name: str = "dynamic",
     output_dir: str = "./gaussian_output_dynamic",
     reference_experiments_dir: str | None = None,
+    view_indices: list[int] | None = None,
 ):
     with torch.no_grad():
         output_path = output_dir
@@ -227,6 +230,7 @@ def render_sets(
             dataset.train_test_exp,
             separate_sh,
             disable_sh=dataset.disable_sh,
+            view_indices=view_indices,
         )
 
 
@@ -291,10 +295,17 @@ if __name__ == "__main__":
     parser.add_argument("--remove_gaussians", action="store_true")
     parser.add_argument("--name", default="sceneA", type=str)
     parser.add_argument("--output_dir", default="./gaussian_output_dynamic", type=str)
+    parser.add_argument(
+        "--view-indices",
+        default=None,
+        help="Comma-separated interpolated pose indices to render (default: 0,50,100).",
+    )
     add_experiments_dir_arg(parser)
     add_reference_experiments_dir_arg(parser)
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
+
+    view_indices = parse_view_indices_csv(args.view_indices)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
@@ -310,6 +321,7 @@ if __name__ == "__main__":
         args.name,
         args.output_dir,
         reference_experiments_root(args),
+        view_indices=view_indices,
     )
 
     with open("./rendering_finished_dynamic.txt", "a") as f:

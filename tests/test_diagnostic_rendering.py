@@ -372,3 +372,25 @@ def test_optimize_cma_disable_video_logging_still_honored(monkeypatch):
                 cma_mod.main()
     assert cfg.disable_video_logging is True
     optimizer.optimize.assert_called_once()
+
+
+def test_gs_render_dynamics_view_indices_cli_parsing():
+    import importlib.util
+    from pathlib import Path
+
+    module_path = Path(__file__).resolve().parents[1] / "qqtt" / "utils" / "output_dirs.py"
+    spec = importlib.util.spec_from_file_location("output_dirs_test", module_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.parse_view_indices_csv("0,50,100") == [0, 50, 100]
+    assert module.parse_view_indices_csv("0,50,100,150") == [0, 50, 100, 150]
+    assert module.parse_view_indices_csv(None) is None
+    assert module.parse_view_indices_csv("") is None
+    with pytest.raises(ValueError, match="non-negative"):
+        module.parse_view_indices_csv("0,-1,50")
+    with pytest.raises(ValueError, match="duplicate"):
+        module.parse_view_indices_csv("0,50,50")
+    with pytest.raises(ValueError, match="invalid view index 'abc'"):
+        module.parse_view_indices_csv("0,abc,50")
