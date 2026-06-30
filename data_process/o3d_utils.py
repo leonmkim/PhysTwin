@@ -81,7 +81,7 @@ def transform_mesh_vertices(mesh: o3d.geometry.TriangleMesh, transform_4x4) -> o
 
 
 LOCKED_NUMPY_VERSION = (1, 26, 4)
-LOCKED_OPENCV_VERSION = (4, 11, 0, 86)
+LOCKED_OPENCV_VERSION_PREFIX = (4, 11, 0)
 LOCKED_OPEN3D_VERSION = (0, 19, 0)
 MIN_OPEN3D_VERSION = (0, 19, 0)
 BLOCKED_OPEN3D_VERSIONS = frozenset({(0, 17, 0)})
@@ -111,10 +111,10 @@ def check_diagnostic_runtime(*, require_xvfb: bool = False) -> dict[str, str]:
             "Diagnostic rendering requires NumPy "
             f"{'.'.join(map(str, LOCKED_NUMPY_VERSION))}; got {np.__version__}"
         )
-    if opencv_version[:4] != LOCKED_OPENCV_VERSION:
+    if opencv_version[:3] != LOCKED_OPENCV_VERSION_PREFIX:
         raise RuntimeError(
-            "Diagnostic rendering requires OpenCV "
-            f"{'.'.join(map(str, LOCKED_OPENCV_VERSION))}; got {cv2.__version__}"
+            "Diagnostic rendering requires OpenCV 4.11.x; "
+            f"got {cv2.__version__}"
         )
     if open3d_version in BLOCKED_OPEN3D_VERSIONS or open3d_version < MIN_OPEN3D_VERSION:
         raise RuntimeError(

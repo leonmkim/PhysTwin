@@ -13,6 +13,7 @@ def test_parse_version_tuple():
 
     assert _parse_version_tuple("1.26.4") == (1, 26, 4)
     assert _parse_version_tuple("4.11.0.86") == (4, 11, 0, 86)
+    assert _parse_version_tuple("4.11.0") == (4, 11, 0)
 
 
 def test_check_diagnostic_runtime_rejects_open3d_017():
