@@ -121,9 +121,65 @@ def test_render_existing_final_data_video_command_path(tmp_path):
     not os.environ.get("DISPLAY"),
     reason="Open3D probe requires Xvfb/DISPLAY",
 )
+def test_probe_open3d_calibrated_camera_under_xvfb_smoke():
+    from data_process.o3d_utils import probe_open3d_calibrated_camera_under_xvfb
+
+    result = probe_open3d_calibrated_camera_under_xvfb(width=32, height=24)
+    assert result["pass"] is True
+    assert result["codec"] in {"avc1", "mp4v"}
+    assert result["frame_shape"] == [24, 32, 3]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("DISPLAY"),
+    reason="Open3D probe requires Xvfb/DISPLAY",
+)
 def test_probe_open3d_visualizer_under_xvfb_smoke():
     from data_process.o3d_utils import probe_open3d_visualizer_under_xvfb
 
     result = probe_open3d_visualizer_under_xvfb(width=32, height=24)
     assert result["pass"] is True
     assert result["codec"] in {"avc1", "mp4v"}
+
+
+def test_render_inference_video_omits_gt_visibility_mask():
+    import sys
+
+    phystwin_root = Path(__file__).resolve().parents[1]
+    if str(phystwin_root) not in sys.path:
+        sys.path.insert(0, str(phystwin_root))
+
+    sys.modules.setdefault("pynput", mock.MagicMock())
+    sys.modules.setdefault("pynput.keyboard", mock.MagicMock())
+
+    import inference_warp as inf_mod
+
+    vertices = np.zeros((2, 9864, 3))
+    gt_visibility = np.ones((2, 6625), dtype=bool)
+
+    with mock.patch.object(inf_mod, "load_visualization_cfg"):
+        with mock.patch.object(
+            inf_mod,
+            "_load_final_data_arrays",
+            return_value=(
+                np.zeros((2, 6625, 3)),
+                np.ones((2, 6625, 3)),
+                np.zeros((2, 1, 3)),
+                gt_visibility,
+                np.ones((2, 6625), dtype=bool),
+            ),
+        ):
+            with mock.patch.object(inf_mod, "visualize_pc") as visualize_pc:
+                with mock.patch.object(inf_mod.pickle, "load", return_value=vertices):
+                    with mock.patch("builtins.open", mock.mock_open(read_data=b"stub")):
+                        inf_mod.render_inference_video_from_pkl(
+                            base_path="/tmp/base",
+                            case_name="case",
+                            inference_pkl="/tmp/inference.pkl",
+                            output_path="/tmp/out.mp4",
+                        )
+
+    assert visualize_pc.call_args[0][3] is None
+    assert visualize_pc.call_args[0][4] is None
+    assert vertices.shape[1] == 9864
+    assert gt_visibility.shape[1] == 6625

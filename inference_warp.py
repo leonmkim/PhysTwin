@@ -121,14 +121,14 @@ def render_inference_video_from_pkl(
     elif object_colors.shape[1] < num_all:
         pad = np.ones((object_colors.shape[0], num_all - object_colors.shape[1], 3)) * 0.3
         object_colors = np.concatenate([object_colors, pad], axis=1)
-    if object_visibilities is not None and object_visibilities.shape[1] > num_all:
-        object_visibilities = object_visibilities[:, :num_all]
+    # Match trainer_warp.py pure-inference rendering: do not pass GT visibility
+    # masks onto the full simulated trajectory (e.g. 6625 tracked vs 9864 simulated).
     visualize_pc(
         vertices,
         object_colors,
         controller_points,
-        object_visibilities,
-        object_motions_valid,
+        None,
+        None,
         visualize=False,
         save_video=True,
         save_path=output_path,

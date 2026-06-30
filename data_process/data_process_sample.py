@@ -125,6 +125,58 @@ def process_unique_points(track_data, *, base_path: str, case_name: str):
     return track_data
 
 
+def render_final_pcd_turntable(
+    track_data: dict,
+    *,
+    base_path: str,
+    case_name: str,
+    fps: int = 30,
+) -> Path:
+    """Render optional author turntable preview (final_pcd.mp4) when --vis is set."""
+    surface = np.asarray(track_data.get("surface_points", np.zeros((0, 3))))
+    interior = np.asarray(track_data.get("interior_points", np.zeros((0, 3))))
+    object_pts = np.asarray(track_data["object_points"][0])
+    chunks = [chunk for chunk in (surface, interior, object_pts) if chunk.size]
+    all_points = np.concatenate(chunks, axis=0) if chunks else object_pts
+
+    output_path = Path(base_path) / case_name / "final_pcd.mp4"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    all_pcd = o3d.geometry.PointCloud()
+    all_pcd.points = vec3d(all_points)
+
+    vis = None
+    video_writer = None
+    try:
+        vis = create_checked_visualizer(
+            width=1920,
+            height=1080,
+            visible=False,
+            window_name="PhysTwinFinalPcd",
+        )
+        frame = capture_visualizer_frame(vis)
+        height, width = frame.shape[:2]
+        video_writer, codec = create_mp4_writer(
+            output_path,
+            fps=float(fps),
+            width=width,
+            height=height,
+        )
+        print(f"[render_final_pcd_turntable] codec={codec!r} output={output_path}")
+
+        vis.add_geometry(all_pcd)
+        view_control = vis.get_view_control()
+        for _ in range(360):
+            view_control.rotate(10, 0)
+            frame = capture_visualizer_frame(vis)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            video_writer.write(frame)
+    finally:
+        release_mp4_writer(video_writer)
+        destroy_visualizer(vis)
+    return output_path
+
+
 def visualize_track(track_data, *, output_path: str | Path, fps: int = 30) -> None:
     object_points = track_data["object_points"]
     object_visibilities = track_data["object_visibilities"]
@@ -289,9 +341,16 @@ def main() -> int:
         pickle.dump(track_data, f)
 
     if args.vis:
+        render_final_pcd_turntable(
+            track_data,
+            base_path=args.base_path,
+            case_name=args.case_name,
+            fps=args.fps,
+        )
         visualize_track(
             track_data,
             output_path=f"{args.base_path}/{args.case_name}/final_data.mp4",
+            fps=args.fps,
         )
     return 0
 

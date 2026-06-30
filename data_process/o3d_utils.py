@@ -212,15 +212,42 @@ def release_mp4_writer(writer: object | None) -> None:
         pass
 
 
-def probe_open3d_visualizer_under_xvfb(*, width: int = 64, height: int = 48) -> dict[str, object]:
-    """Lightweight Open3D window + capture probe for diagnostic preflight."""
+def probe_open3d_calibrated_camera_under_xvfb(
+    *,
+    width: int = 64,
+    height: int = 48,
+) -> dict[str, object]:
+    """Exercise Open3D window, camera parameters, capture, and MP4 encoding under Xvfb."""
     check_diagnostic_runtime(require_xvfb=True)
     vis = None
+    probe_path = os.path.join(
+        os.environ.get("TMPDIR", "/tmp"),
+        "phystwin_o3d_calibrated_probe.mp4",
+    )
     try:
         vis = create_checked_visualizer(width=width, height=height, visible=False)
+        intrinsic = o3d.camera.PinholeCameraIntrinsic(
+            int(width),
+            int(height),
+            525.0,
+            525.0,
+            float(width) / 2.0,
+            float(height) / 2.0,
+        )
+        parameters = o3d.camera.PinholeCameraParameters()
+        parameters.intrinsic = intrinsic
+        parameters.extrinsic = np.eye(4, dtype=np.float64)
+        view_control = vis.get_view_control()
+        view_control.convert_from_pinhole_camera_parameters(parameters)
+
+        mesh = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+        vis.add_geometry(mesh)
         frame = capture_visualizer_frame(vis)
+        if frame.size == 0:
+            raise RuntimeError("Open3D calibrated-camera probe captured an empty frame")
+
         writer, codec = create_mp4_writer(
-            os.path.join(os.environ.get("TMPDIR", "/tmp"), "phystwin_o3d_probe.mp4"),
+            probe_path,
             fps=1.0,
             width=width,
             height=height,
@@ -230,6 +257,20 @@ def probe_open3d_visualizer_under_xvfb(*, width: int = 64, height: int = 48) -> 
         bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         writer.write(bgr)
         release_mp4_writer(writer)
-        return {"pass": True, "codec": codec, "frame_shape": list(frame.shape)}
+
+        if not os.path.isfile(probe_path) or os.path.getsize(probe_path) <= 0:
+            raise RuntimeError("Open3D calibrated-camera probe produced an empty MP4")
+
+        return {
+            "pass": True,
+            "codec": codec,
+            "frame_shape": list(frame.shape),
+            "probe_path": probe_path,
+        }
     finally:
         destroy_visualizer(vis)
+
+
+def probe_open3d_visualizer_under_xvfb(*, width: int = 64, height: int = 48) -> dict[str, object]:
+    """Lightweight Open3D window + capture probe for diagnostic preflight."""
+    return probe_open3d_calibrated_camera_under_xvfb(width=width, height=height)
