@@ -203,39 +203,73 @@ class OptimizerCMA:
         assert min < max, "The minimum value should be less than the maximum value"
         return value * (max - min) + min
 
-    def optimize(self, max_iter=100):
-        # Initialize the parameters
-        init_global_spring_Y = self.normalize(
-            cfg.init_spring_Y, cfg.spring_Y_min, cfg.spring_Y_max
+    def build_initial_cma_parameters(self) -> np.ndarray:
+        """Normalized initial CMA vector from cfg defaults (same as optimize())."""
+        return np.array(
+            [
+                self.normalize(cfg.init_spring_Y, cfg.spring_Y_min, cfg.spring_Y_max),
+                self.normalize(cfg.object_radius, 0.01, 0.05),
+                self.normalize(cfg.object_max_neighbours, 10, 50),
+                self.normalize(cfg.controller_radius, 0.01, 0.08),
+                self.normalize(cfg.controller_max_neighbours, 10, 80),
+                cfg.collide_elas,
+                self.normalize(cfg.collide_fric, 0, 2),
+                cfg.collide_object_elas,
+                self.normalize(cfg.collide_object_fric, 0, 2),
+                self.normalize(cfg.collision_dist, 0.01, 0.05),
+                self.normalize(cfg.drag_damping, 0, 20),
+                self.normalize(cfg.dashpot_damping, 0, 200),
+            ],
+            dtype=np.float32,
         )
-        init_object_radius = self.normalize(cfg.object_radius, 0.01, 0.05)
-        init_object_max_neighbours = self.normalize(cfg.object_max_neighbours, 10, 50)
-        init_controller_radius = self.normalize(cfg.controller_radius, 0.01, 0.08)
-        init_controller_max_neighbours = self.normalize(
-            cfg.controller_max_neighbours, 10, 80
-        )
-        init_collide_elas = cfg.collide_elas
-        init_collide_fric = self.normalize(cfg.collide_fric, 0, 2)
-        init_collide_object_elas = cfg.collide_object_elas
-        init_collide_object_fric = self.normalize(cfg.collide_object_fric, 0, 2)
-        init_collision_dist = self.normalize(cfg.collision_dist, 0.01, 0.05)
-        init_drag_damping = self.normalize(cfg.drag_damping, 0, 20)
-        init_dashpot_damping = self.normalize(cfg.dashpot_damping, 0, 200)
 
-        x_init = [
-            init_global_spring_Y,
-            init_object_radius,
-            init_object_max_neighbours,
-            init_controller_radius,
-            init_controller_max_neighbours,
-            init_collide_elas,
-            init_collide_fric,
-            init_collide_object_elas,
-            init_collide_object_fric,
-            init_collision_dist,
-            init_drag_damping,
-            init_dashpot_damping,
-        ]
+    def optimal_results_to_cma_parameters(self, optimal_results: dict) -> np.ndarray:
+        """Convert denormalized optimal_params.pkl dict to normalized CMA vector."""
+        return np.array(
+            [
+                self.normalize(
+                    float(optimal_results["global_spring_Y"]),
+                    cfg.spring_Y_min,
+                    cfg.spring_Y_max,
+                ),
+                self.normalize(float(optimal_results["object_radius"]), 0.01, 0.05),
+                self.normalize(float(optimal_results["object_max_neighbours"]), 10, 50),
+                self.normalize(float(optimal_results["controller_radius"]), 0.01, 0.08),
+                self.normalize(
+                    float(optimal_results["controller_max_neighbours"]), 10, 80
+                ),
+                float(optimal_results["collide_elas"]),
+                self.normalize(float(optimal_results["collide_fric"]), 0, 2),
+                float(optimal_results["collide_object_elas"]),
+                self.normalize(float(optimal_results["collide_object_fric"]), 0, 2),
+                self.normalize(float(optimal_results["collision_dist"]), 0.01, 0.05),
+                self.normalize(float(optimal_results["drag_damping"]), 0, 20),
+                self.normalize(float(optimal_results["dashpot_damping"]), 0, 200),
+            ],
+            dtype=np.float32,
+        )
+
+    def render_rollout_video(
+        self,
+        parameters: np.ndarray | list[float],
+        *,
+        output_path: str | os.PathLike[str],
+        label: str,
+    ) -> dict[str, object]:
+        """Run one forward rollout and render an author-native diagnostic video."""
+        output = os.fspath(output_path)
+        os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+        params = np.asarray(parameters, dtype=np.float32)
+        self.error_func(params, visualize=True, video_path=output)
+        return {
+            "output_path": output,
+            "label": label,
+            "frame_count": int(self.dataset.frame_len),
+            "status": "ok",
+        }
+
+    def optimize(self, max_iter=100):
+        x_init = self.build_initial_cma_parameters()
 
         self.error_func(
             x_init, visualize=True, video_path=f"{cfg.base_dir}/optimizeCMA/init.mp4"

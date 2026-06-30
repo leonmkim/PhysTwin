@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import pickle
 from pathlib import Path
 from unittest import mock
 
@@ -183,3 +185,190 @@ def test_render_inference_video_omits_gt_visibility_mask():
     assert visualize_pc.call_args[0][4] is None
     assert vertices.shape[1] == 9864
     assert gt_visibility.shape[1] == 6625
+
+
+def test_render_cma_rollout_video_only_init_uses_initial_parameters(tmp_path):
+    import sys
+
+    phystwin_root = Path(__file__).resolve().parents[1]
+    if str(phystwin_root) not in sys.path:
+        sys.path.insert(0, str(phystwin_root))
+
+    import optimize_cma as cma_mod
+
+    base = tmp_path / "data"
+    case = "case_a"
+    case_dir = base / case
+    case_dir.mkdir(parents=True)
+    (case_dir / "calibrate.pkl").write_bytes(pickle.dumps([np.eye(4)]))
+    (case_dir / "metadata.json").write_text(
+        json.dumps({"intrinsics": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "WH": [64, 48]})
+    )
+    (case_dir / "final_data.pkl").write_bytes(b"stub")
+    out = tmp_path / "init.mp4"
+
+    optimizer = mock.Mock()
+    optimizer.build_initial_cma_parameters.return_value = np.zeros(12, dtype=np.float32)
+    optimizer.render_rollout_video.return_value = {
+        "output_path": str(out),
+        "label": "init",
+        "frame_count": 2,
+        "status": "ok",
+    }
+
+    with mock.patch.object(cma_mod, "load_visualization_cfg"):
+        with mock.patch.object(cma_mod, "OptimizerCMA", return_value=optimizer):
+            result = cma_mod.render_cma_rollout_video_only(
+                base_path=str(base),
+                case_name=case,
+                train_frame=2,
+                rollout_kind="init",
+                output_video_path=str(out),
+                scratch_base_dir=str(tmp_path / "scratch"),
+            )
+
+    optimizer.build_initial_cma_parameters.assert_called_once()
+    optimizer.optimal_results_to_cma_parameters.assert_not_called()
+    optimizer.render_rollout_video.assert_called_once()
+    assert result["label"] == "init"
+
+
+def test_render_cma_rollout_video_only_optimal_loads_pickle(tmp_path):
+    import sys
+
+    phystwin_root = Path(__file__).resolve().parents[1]
+    if str(phystwin_root) not in sys.path:
+        sys.path.insert(0, str(phystwin_root))
+
+    import optimize_cma as cma_mod
+
+    base = tmp_path / "data"
+    case = "case_a"
+    case_dir = base / case
+    case_dir.mkdir(parents=True)
+    (case_dir / "calibrate.pkl").write_bytes(pickle.dumps([np.eye(4)]))
+    (case_dir / "metadata.json").write_text(
+        json.dumps({"intrinsics": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "WH": [64, 48]})
+    )
+    (case_dir / "final_data.pkl").write_bytes(b"stub")
+    optimal_path = tmp_path / "optimal_params.pkl"
+    optimal = {"global_spring_Y": 1.0, "object_radius": 0.02}
+    with open(optimal_path, "wb") as handle:
+        pickle.dump(optimal, handle)
+    out = tmp_path / "optimal.mp4"
+
+    optimizer = mock.Mock()
+    optimizer.optimal_results_to_cma_parameters.return_value = np.ones(12, dtype=np.float32)
+    optimizer.render_rollout_video.return_value = {
+        "output_path": str(out),
+        "label": "optimal",
+        "frame_count": 2,
+        "status": "ok",
+    }
+
+    with mock.patch.object(cma_mod, "load_visualization_cfg"):
+        with mock.patch.object(cma_mod, "OptimizerCMA", return_value=optimizer):
+            result = cma_mod.render_cma_rollout_video_only(
+                base_path=str(base),
+                case_name=case,
+                train_frame=2,
+                rollout_kind="optimal",
+                output_video_path=str(out),
+                optimal_params_path=str(optimal_path),
+                scratch_base_dir=str(tmp_path / "scratch"),
+            )
+
+    optimizer.optimal_results_to_cma_parameters.assert_called_once()
+    optimizer.build_initial_cma_parameters.assert_not_called()
+    assert result["label"] == "optimal"
+
+
+def test_render_cma_rollout_video_only_missing_optimal_params(tmp_path):
+    import sys
+
+    phystwin_root = Path(__file__).resolve().parents[1]
+    if str(phystwin_root) not in sys.path:
+        sys.path.insert(0, str(phystwin_root))
+
+    import optimize_cma as cma_mod
+
+    with mock.patch.object(cma_mod, "load_visualization_cfg"):
+        with pytest.raises(FileNotFoundError, match="optimal_params.pkl"):
+            cma_mod.render_cma_rollout_video_only(
+                base_path=str(tmp_path / "data"),
+                case_name="case_a",
+                train_frame=2,
+                rollout_kind="optimal",
+                output_video_path=str(tmp_path / "out.mp4"),
+                optimal_params_path=str(tmp_path / "missing.pkl"),
+                scratch_base_dir=str(tmp_path / "scratch"),
+            )
+
+
+def test_optimize_cma_cli_render_only_exits_before_optimize(tmp_path, monkeypatch):
+    import sys
+
+    phystwin_root = Path(__file__).resolve().parents[1]
+    if str(phystwin_root) not in sys.path:
+        sys.path.insert(0, str(phystwin_root))
+
+    import optimize_cma as cma_mod
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "optimize_cma.py",
+            "--base_path",
+            str(tmp_path / "data"),
+            "--case_name",
+            "case_a",
+            "--train_frame",
+            "2",
+            "--render-cma-rollout-video-only",
+            "--cma-rollout-kind",
+            "init",
+            "--output-video-path",
+            str(tmp_path / "init.mp4"),
+        ],
+    )
+    with mock.patch.object(cma_mod, "render_cma_rollout_video_only") as render_only:
+        with mock.patch.object(cma_mod, "OptimizerCMA") as optimizer_cls:
+            with pytest.raises(SystemExit) as exc:
+                cma_mod.main()
+    assert exc.value.code == 0
+    render_only.assert_called_once()
+    optimizer_cls.assert_not_called()
+
+
+def test_optimize_cma_disable_video_logging_still_honored(monkeypatch):
+    import sys
+
+    phystwin_root = Path(__file__).resolve().parents[1]
+    if str(phystwin_root) not in sys.path:
+        sys.path.insert(0, str(phystwin_root))
+
+    import optimize_cma as cma_mod
+    from qqtt.utils.config import cfg
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "optimize_cma.py",
+            "--base_path",
+            "/tmp/data",
+            "--case_name",
+            "case_a",
+            "--train_frame",
+            "2",
+            "--disable-video-logging",
+        ],
+    )
+    optimizer = mock.Mock()
+    with mock.patch.object(cma_mod, "load_visualization_cfg"):
+        with mock.patch.object(cma_mod, "OptimizerCMA", return_value=optimizer):
+            with mock.patch.object(cma_mod.logger, "set_log_file"):
+                cma_mod.main()
+    assert cfg.disable_video_logging is True
+    optimizer.optimize.assert_called_once()
