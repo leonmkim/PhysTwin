@@ -9,37 +9,26 @@ import trimesh
 import cv2
 from utils.align_util import as_mesh
 from argparse import ArgumentParser
+from pathlib import Path
 
 try:
-    from data_process.o3d_utils import vec3d
+    from data_process.o3d_utils import (
+        capture_visualizer_frame,
+        create_checked_visualizer,
+        create_mp4_writer,
+        destroy_visualizer,
+        release_mp4_writer,
+        vec3d,
+    )
 except ImportError:  # pragma: no cover - direct script invocation
-    from o3d_utils import vec3d
-
-parser = ArgumentParser()
-parser.add_argument(
-    "--base_path",
-    type=str,
-    required=True,
-)
-parser.add_argument("--case_name", type=str, required=True)
-parser.add_argument("--shape_prior", action="store_true", default=False)
-parser.add_argument("--num_surface_points", type=int, default=1024)
-parser.add_argument("--volume_sample_size", type=float, default=0.005)
-parser.add_argument(
-    "--vis",
-    action="store_true",
-    default=False,
-    help="Render optional preview videos (off by default for headless runs).",
-)
-args = parser.parse_args()
-
-base_path = args.base_path
-case_name = args.case_name
-
-# Used to judge if using the shape prior
-SHAPE_PRIOR = args.shape_prior
-num_surface_points = args.num_surface_points
-volume_sample_size = args.volume_sample_size
+    from o3d_utils import (
+        capture_visualizer_frame,
+        create_checked_visualizer,
+        create_mp4_writer,
+        destroy_visualizer,
+        release_mp4_writer,
+        vec3d,
+    )
 
 
 def getSphereMesh(center, radius=0.1, color=[0, 0, 0]):
@@ -48,14 +37,13 @@ def getSphereMesh(center, radius=0.1, color=[0, 0, 0]):
     return sphere
 
 
-def process_unique_points(track_data):
+def process_unique_points(track_data, *, base_path: str, case_name: str):
     object_points = track_data["object_points"]
     object_colors = track_data["object_colors"]
     object_visibilities = track_data["object_visibilities"]
     object_motions_valid = track_data["object_motions_valid"]
     controller_points = track_data["controller_points"]
 
-    # Get the unique index in the object points
     first_object_points = object_points[0]
     unique_idx = np.unique(first_object_points, axis=0, return_index=True)[1]
     object_points = object_points[:, unique_idx, :]
@@ -63,18 +51,15 @@ def process_unique_points(track_data):
     object_visibilities = object_visibilities[:, unique_idx]
     object_motions_valid = object_motions_valid[:, unique_idx]
 
-    # Make sure all points are above the ground
     object_points[object_points[..., 2] > 0, 2] = 0
 
     if SHAPE_PRIOR:
         shape_mesh_path = f"{base_path}/{case_name}/shape/matching/final_mesh.glb"
         trimesh_mesh = trimesh.load(shape_mesh_path, force="mesh")
         trimesh_mesh = as_mesh(trimesh_mesh)
-        # Sample the surface points
         surface_points, _ = trimesh.sample.sample_surface(
             trimesh_mesh, num_surface_points
         )
-        # Sample the interior points
         interior_points = trimesh.sample.volume_mesh(trimesh_mesh, 10000)
 
     if SHAPE_PRIOR:
@@ -83,7 +68,7 @@ def process_unique_points(track_data):
         )
     else:
         all_points = object_points[0]
-    # Do the volume sampling for the object points, prioritize the original object points, then surface points, then interior points
+
     min_bound = np.min(all_points, axis=0)
     index = []
     grid_flag = {}
@@ -122,34 +107,6 @@ def process_unique_points(track_data):
     else:
         all_points = object_points[0][index]
 
-    # Render the final pcd with interior filling as a turntable video
-    if args.vis:
-        all_pcd = o3d.geometry.PointCloud()
-        all_pcd.points = vec3d(all_points)
-        coorindate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-
-        vis = o3d.visualization.Visualizer()
-        vis.create_window(visible=False)
-        dummy_frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
-        height, width, _ = dummy_frame.shape
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
-        video_writer = cv2.VideoWriter(
-            f"{base_path}/{case_name}/final_pcd.mp4", fourcc, 30, (width, height)
-        )
-
-        vis.add_geometry(all_pcd)
-        # vis.add_geometry(coorindate)
-        view_control = vis.get_view_control()
-        for j in range(360):
-            view_control.rotate(10, 0)
-            vis.poll_events()
-            vis.update_renderer()
-            frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
-            frame = (frame * 255).astype(np.uint8)
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            video_writer.write(frame)
-        vis.destroy_window()
-
     track_data.pop("object_points")
     track_data.pop("object_colors")
     track_data.pop("object_visibilities")
@@ -168,87 +125,235 @@ def process_unique_points(track_data):
     return track_data
 
 
-def visualize_track(track_data):
+def render_final_pcd_turntable(
+    track_data: dict,
+    *,
+    base_path: str,
+    case_name: str,
+    fps: int = 30,
+) -> Path:
+    """Render optional author turntable preview (final_pcd.mp4) when --vis is set."""
+    surface = np.asarray(track_data.get("surface_points", np.zeros((0, 3))))
+    interior = np.asarray(track_data.get("interior_points", np.zeros((0, 3))))
+    object_pts = np.asarray(track_data["object_points"][0])
+    chunks = [chunk for chunk in (surface, interior, object_pts) if chunk.size]
+    all_points = np.concatenate(chunks, axis=0) if chunks else object_pts
+
+    output_path = Path(base_path) / case_name / "final_pcd.mp4"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    all_pcd = o3d.geometry.PointCloud()
+    all_pcd.points = vec3d(all_points)
+
+    vis = None
+    video_writer = None
+    try:
+        vis = create_checked_visualizer(
+            width=1920,
+            height=1080,
+            visible=False,
+            window_name="PhysTwinFinalPcd",
+        )
+        frame = capture_visualizer_frame(vis)
+        height, width = frame.shape[:2]
+        video_writer, codec = create_mp4_writer(
+            output_path,
+            fps=float(fps),
+            width=width,
+            height=height,
+        )
+        print(f"[render_final_pcd_turntable] codec={codec!r} output={output_path}")
+
+        vis.add_geometry(all_pcd)
+        view_control = vis.get_view_control()
+        for _ in range(360):
+            view_control.rotate(10, 0)
+            frame = capture_visualizer_frame(vis)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            video_writer.write(frame)
+    finally:
+        release_mp4_writer(video_writer)
+        destroy_visualizer(vis)
+    return output_path
+
+
+def visualize_track(track_data, *, output_path: str | Path, fps: int = 30) -> None:
     object_points = track_data["object_points"]
-    object_colors = track_data["object_colors"]
     object_visibilities = track_data["object_visibilities"]
-    object_motions_valid = track_data["object_motions_valid"]
     controller_points = track_data["controller_points"]
 
     frame_num = object_points.shape[0]
-
-    vis = o3d.visualization.Visualizer()
-    vis.create_window(visible=False)
-    dummy_frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
-    height, width, _ = dummy_frame.shape
-    fourcc = cv2.VideoWriter_fourcc(*"avc1")
-    video_writer = cv2.VideoWriter(
-        f"{base_path}/{case_name}/final_data.mp4", fourcc, 30, (width, height)
-    )
-
-    controller_meshes = []
-    prev_center = []
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     y_min, y_max = np.min(object_points[0, :, 1]), np.max(object_points[0, :, 1])
     y_normalized = (object_points[0, :, 1] - y_min) / (y_max - y_min)
     rainbow_colors = plt.cm.rainbow(y_normalized)[:, :3]
 
-    for i in range(frame_num):
-        object_pcd = o3d.geometry.PointCloud()
-        object_pcd.points = vec3d(
-            object_points[i, np.where(object_visibilities[i])[0], :]
+    vis = None
+    video_writer = None
+    try:
+        vis = create_checked_visualizer(
+            width=1920,
+            height=1080,
+            visible=False,
+            window_name="PhysTwinFinalData",
         )
-        # object_pcd.colors = vec3d(
-        #     object_colors[i, np.where(object_motions_valid[i])[0], :]
-        # )
-        object_pcd.colors = vec3d(
-            rainbow_colors[np.where(object_visibilities[i])[0]]
+        frame = capture_visualizer_frame(vis)
+        height, width = frame.shape[:2]
+        video_writer, codec = create_mp4_writer(
+            output_path,
+            fps=float(fps),
+            width=width,
+            height=height,
         )
+        print(f"[visualize_track] codec={codec!r} output={output_path}")
 
-        if i == 0:
-            render_object_pcd = object_pcd
-            vis.add_geometry(render_object_pcd)
-            # Use sphere mesh for each controller point
-            for j in range(controller_points.shape[1]):
-                origin = controller_points[i, j]
-                origin_color = [1, 0, 0]
-                controller_meshes.append(
-                    getSphereMesh(origin, color=origin_color, radius=0.01)
-                )
-                vis.add_geometry(controller_meshes[-1])
-                prev_center.append(origin)
-            # Adjust the viewpoint
-            view_control = vis.get_view_control()
-            view_control.set_front([1, 0, -2])
-            view_control.set_up([0, 0, -1])
-            view_control.set_zoom(1)
-        else:
-            render_object_pcd.points = vec3d(object_pcd.points)
-            render_object_pcd.colors = vec3d(object_pcd.colors)
-            vis.update_geometry(render_object_pcd)
-            for j in range(controller_points.shape[1]):
-                origin = controller_points[i, j]
-                controller_meshes[j].translate(origin - prev_center[j])
-                vis.update_geometry(controller_meshes[j])
-                prev_center[j] = origin
-            vis.poll_events()
-            vis.update_renderer()
+        controller_meshes = []
+        prev_center = []
+        render_object_pcd = None
 
-        frame = np.asarray(vis.capture_screen_float_buffer(do_render=True))
-        frame = (frame * 255).astype(np.uint8)
-        # Convert RGB to BGR
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        video_writer.write(frame)
+        for i in range(frame_num):
+            object_pcd = o3d.geometry.PointCloud()
+            visible_idx = np.where(object_visibilities[i])[0]
+            object_pcd.points = vec3d(
+                object_points[i, visible_idx, :]
+            )
+            object_pcd.colors = vec3d(
+                rainbow_colors[visible_idx]
+            )
+
+            if i == 0:
+                render_object_pcd = object_pcd
+                vis.add_geometry(render_object_pcd)
+                for j in range(controller_points.shape[1]):
+                    origin = controller_points[i, j]
+                    controller_meshes.append(
+                        getSphereMesh(origin, color=[1, 0, 0], radius=0.01)
+                    )
+                    vis.add_geometry(controller_meshes[-1])
+                    prev_center.append(origin)
+                view_control = vis.get_view_control()
+                view_control.set_front([1, 0, -2])
+                view_control.set_up([0, 0, -1])
+                view_control.set_zoom(1)
+            else:
+                render_object_pcd.points = vec3d(object_pcd.points)
+                render_object_pcd.colors = vec3d(object_pcd.colors)
+                vis.update_geometry(render_object_pcd)
+                for j in range(controller_points.shape[1]):
+                    origin = controller_points[i, j]
+                    controller_meshes[j].translate(origin - prev_center[j])
+                    vis.update_geometry(controller_meshes[j])
+                    prev_center[j] = origin
+
+            frame = capture_visualizer_frame(vis)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            video_writer.write(frame)
+    finally:
+        release_mp4_writer(video_writer)
+        destroy_visualizer(vis)
 
 
-if __name__ == "__main__":
-    with open(f"{base_path}/{case_name}/track_process_data.pkl", "rb") as f:
+def render_existing_final_data_video(
+    *,
+    base_path: str,
+    case_name: str,
+    output_path: str | Path,
+    final_data_pkl: str | Path | None = None,
+    fps: int = 30,
+) -> Path:
+    pkl_path = (
+        Path(final_data_pkl)
+        if final_data_pkl is not None
+        else Path(base_path) / case_name / "final_data.pkl"
+    )
+    if not pkl_path.is_file():
+        raise FileNotFoundError(f"final_data.pkl not found: {pkl_path}")
+    with open(pkl_path, "rb") as f:
+        track_data = pickle.load(f)
+    visualize_track(track_data, output_path=output_path, fps=fps)
+    return Path(output_path)
+
+
+def parse_args():
+    parser = ArgumentParser()
+    parser.add_argument("--base_path", type=str, required=True)
+    parser.add_argument("--case_name", type=str, required=True)
+    parser.add_argument("--shape_prior", action="store_true", default=False)
+    parser.add_argument("--num_surface_points", type=int, default=1024)
+    parser.add_argument("--volume_sample_size", type=float, default=0.005)
+    parser.add_argument(
+        "--vis",
+        action="store_true",
+        default=False,
+        help="Render optional preview videos (off by default for headless runs).",
+    )
+    parser.add_argument(
+        "--render-existing-final-data-video",
+        action="store_true",
+        help="Render final_data.mp4 from an existing final_data.pkl without resampling.",
+    )
+    parser.add_argument(
+        "--final-data-pkl",
+        type=str,
+        default=None,
+        help="Optional path to final_data.pkl (default: <base>/<case>/final_data.pkl).",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=str,
+        default=None,
+        help="Explicit MP4 output path for --render-existing-final-data-video.",
+    )
+    parser.add_argument("--fps", type=int, default=30)
+    return parser.parse_args()
+
+
+def main() -> int:
+    global SHAPE_PRIOR, num_surface_points, volume_sample_size
+    args = parse_args()
+    SHAPE_PRIOR = args.shape_prior
+    num_surface_points = args.num_surface_points
+    volume_sample_size = args.volume_sample_size
+
+    if args.render_existing_final_data_video:
+        output_path = args.output_path or f"{args.base_path}/{args.case_name}/final_data.mp4"
+        render_existing_final_data_video(
+            base_path=args.base_path,
+            case_name=args.case_name,
+            output_path=output_path,
+            final_data_pkl=args.final_data_pkl,
+            fps=args.fps,
+        )
+        return 0
+
+    with open(f"{args.base_path}/{args.case_name}/track_process_data.pkl", "rb") as f:
         track_data = pickle.load(f)
 
-    track_data = process_unique_points(track_data)
+    track_data = process_unique_points(
+        track_data,
+        base_path=args.base_path,
+        case_name=args.case_name,
+    )
 
-    with open(f"{base_path}/{case_name}/final_data.pkl", "wb") as f:
+    with open(f"{args.base_path}/{args.case_name}/final_data.pkl", "wb") as f:
         pickle.dump(track_data, f)
 
     if args.vis:
-        visualize_track(track_data)
+        render_final_pcd_turntable(
+            track_data,
+            base_path=args.base_path,
+            case_name=args.case_name,
+            fps=args.fps,
+        )
+        visualize_track(
+            track_data,
+            output_path=f"{args.base_path}/{args.case_name}/final_data.mp4",
+            fps=args.fps,
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
