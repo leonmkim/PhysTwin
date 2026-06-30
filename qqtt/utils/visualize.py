@@ -21,6 +21,17 @@ def visualize_pc(
     vis_cam_idx=0,
 ):
     # Deprecated function, use visualize_pc instead
+    # Headless-safe guard: when video logging is disabled, skip Open3D
+    # Visualizer rendering entirely. create_window() + the offscreen GL
+    # render segfaults under headless/xvfb. The save_video outputs
+    # (gt/init/result .mp4) are diagnostics not consumed by optimization.
+    # Mirrors the cfg.disable_video_logging handling already in trainer_warp.
+    if save_video and cfg.disable_video_logging:
+        logger.info(
+            "disable_video_logging is set; skipping Open3D video render "
+            f"(save_path={save_path})."
+        )
+        return None
     FPS = cfg.FPS
     width, height = cfg.WH
     intrinsic = cfg.intrinsics[vis_cam_idx]

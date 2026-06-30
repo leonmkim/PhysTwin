@@ -37,6 +37,11 @@ if __name__ == "__main__":
     parser.add_argument("--case_name", type=str, required=True)
     parser.add_argument("--train_frame", type=int, required=True)
     parser.add_argument("--max_iter", type=int, default=20)
+    parser.add_argument(
+        "--disable-video-logging",
+        action="store_true",
+        help="Disable Open3D diagnostic video rendering (headless-safe).",
+    )
     add_experiments_optimization_dir_arg(parser)
     args = parser.parse_args()
 
@@ -49,6 +54,9 @@ if __name__ == "__main__":
         cfg.load_from_yaml("configs/cloth.yaml")
     else:
         cfg.load_from_yaml("configs/real.yaml")
+
+    if args.disable_video_logging:
+        cfg.disable_video_logging = True
 
     base_dir = experiments_optimization_case_dir(args, case_name)
 
